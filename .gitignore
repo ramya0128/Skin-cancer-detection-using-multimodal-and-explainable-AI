@@ -1,0 +1,14 @@
+
+# Python environment
+.venv/
+__pycache__/
+*.pyc
+
+# Cached image data
+cache/
+
+# Downloaded pretrained weights
+torch_home/
+
+# Generated outputs
+outputs/
