@@ -78,9 +78,12 @@
   - `paired_nll_gains(probabilities: dict[str, np.ndarray], labels: np.ndarray) -> dict[str, np.ndarray]`: returns paired per-patient `image_only - joint` and `clinical_only - joint` NLL gains.
   - `primary_nll_inference(probabilities: dict[str, np.ndarray], test_logits: dict[str, np.ndarray], test_labels: np.ndarray, calibration_logits: dict[str, np.ndarray], calibration_labels: np.ndarray, test_classes: np.ndarray, replicates: int, seed: int, threshold: float) -> dict[str, object]`: performs nested paired class-stratified calibration/test bootstrap and Holm-inverted lower bounds. It uses `probabilities` for the frozen-calibration point estimates and applies each replicate's refitted temperature to `test_logits`.
   - `cue_mask_sensitivity(joint_model: torch.nn.Module, patients: list[SyntheticPatient], config: dict[str, object]) -> dict[str, np.ndarray]`: averages 20 replacement draws per patient; results are explicitly marked diagnostic.
+  - `build_localization_controls(masks: dict[str, np.ndarray], seed: int, repeats: int = 20) -> dict[str, np.ndarray]`: returns fractional patch-grid masks for area-matched marker/lesion regions, random maps, and a center-Gaussian control.
   - `localization_metrics(maps: np.ndarray, masks: dict[str, np.ndarray], controls: dict[str, np.ndarray], patient_ids: np.ndarray) -> dict[str, np.ndarray]`: returns marker/lesion/background mass, area enrichment, pointing-game, and region-control results.
-  - `deletion_insertion_metrics(model: torch.nn.Module, images: torch.Tensor, background_canvases: torch.Tensor, maps: dict[str, np.ndarray], targets: np.ndarray, config: dict[str, object]) -> dict[str, np.ndarray]`: returns target-specific curves/AUCs and random/center controls.
-  - `stability_metrics(model: torch.nn.Module, images: torch.Tensor, maps: dict[str, np.ndarray], targets: np.ndarray, config: dict[str, object]) -> dict[str, np.ndarray]`: returns transformed predictions, map similarities, and unchanged-prediction denominators.
+  - `deletion_insertion_metrics(model: torch.nn.Module, model_kind: str, images: torch.Tensor, categories: np.ndarray | None, background_canvases: torch.Tensor, maps: dict[str, np.ndarray], targets: np.ndarray, config: dict[str, object]) -> dict[str, np.ndarray]`: returns calibrated target-specific fixed-score curves/AUCs and random/center controls for image-only or joint-fusion scores.
+  - `stability_metrics(model: torch.nn.Module, model_kind: str, images: torch.Tensor, categories: np.ndarray | None, maps: dict[str, np.ndarray], targets: np.ndarray, config: dict[str, object]) -> dict[str, np.ndarray]`: returns calibrated transformed predictions, map similarities, and unchanged-prediction denominators.
+  - `bootstrap_mean_interval(values: np.ndarray, replicates: int = 2000, seed: int = 20261119) -> tuple[float, float]`: returns a two-sided patient-level percentile interval.
+  - `paired_signflip_p(values_a: np.ndarray, values_b: np.ndarray, draws: int = 10000, seed: int = 20261119) -> float`: returns a two-sided patient-level sign-flip p-value with add-one correction.
 - `io.py`
   - `validate_config(config: dict[str, object]) -> None`: rejects unauthorized conditions, changed thresholds, or incompatible split counts.
   - `prepare_run_dir(output_dir: Path, config_hash: str, source_hashes: dict[str, str], resume: bool) -> None`: refuses overwrite; resume requires an exact config/source identity match.
@@ -90,9 +93,9 @@
   - CLI `--preflight-only` measures a small synthetic GPU batch and validates storage without evaluating held-out metrics.
   - CLI `--run` executes the frozen balanced config; no test labels are loaded until all checkpoints and calibrators are frozen.
 - `explain.py`
-  - `compute_image_maps(model: torch.nn.Module, images: torch.Tensor, targets: np.ndarray, methods: tuple[str, ...]) -> dict[str, np.ndarray]`: returns 14x14 maps for only the specified model and fixed targets.
-  - `compute_clinical_attributions(model: torch.nn.Module, clinical_values: np.ndarray, targets: np.ndarray, reference: np.ndarray) -> dict[str, np.ndarray]`: computes the exact categorical attribution against the uniform six-category reference.
-  - `compute_joint_shapley(model: torch.nn.Module, patients: list[SyntheticPatient], targets: np.ndarray, donors: list[SyntheticPatient], game: str) -> dict[str, np.ndarray]`: accepts `game="modality"` or `"cue"` and returns exact two-player values checked for efficiency.
+  - `compute_image_maps(model: torch.nn.Module, model_kind: str, images: torch.Tensor, targets: np.ndarray, categories: np.ndarray | None, methods: tuple[str, ...], batch_size: int = 16, temperature: float = 1.0) -> dict[str, np.ndarray]`: returns 14x14 maps for only the specified model and fixed targets; joint maps hold clinical categories fixed.
+  - `compute_clinical_attributions(model: torch.nn.Module, clinical_values: np.ndarray, targets: np.ndarray, reference: np.ndarray, temperature: float = 1.0) -> dict[str, np.ndarray]`: computes the exact categorical attribution against the uniform six-category reference.
+  - `compute_joint_shapley(model: torch.nn.Module, patients: list[SyntheticPatient], targets: np.ndarray, donors: list[SyntheticPatient], game: str, temperature: float = 1.0) -> dict[str, np.ndarray]`: accepts `game="modality"` or `"cue"` and returns exact two-player values checked for efficiency.
 
 ## Task 1: Config, deterministic generator, and protected IO
 
@@ -209,37 +212,37 @@
 - Consumes: frozen checkpoints/temperatures from Task 2 and exact masks/canvases from Task 1.
 - Produces: image-only and joint-target maps, clinical and Shapley attributions, cue-mask diagnostics, localization results, faithfulness curves, and stability summaries as separate outputs.
 
-- [ ] **Step 1: Write failing tests for explainer targets and fixed-class handling**
+- [x] **Step 1: Write failing tests for explainer targets and fixed-class handling**
 
   Use a small deterministic multimodal test model to assert output map shape `(N,14,14)`, separate image-only and joint-fusion score targets, fixed true-class indices through interventions, four-coalition Shapley efficiency within `1e-5`, and correct clinical categorical reference behavior.
 
-- [ ] **Step 2: Run explainer tests and verify failure**
+- [x] **Step 2: Run explainer tests and verify failure**
 
   Run: `& 'D:\vit_gpu_env\Scripts\python.exe' -m unittest discover -s 'D:\skin_project\experiments\phase_g\tests' -p 'test_explain.py' -v`
 
   Expected: FAIL because Phase G explainer adapters are not implemented.
 
-- [ ] **Step 3: Write failing tests that distinguish localization from faithfulness**
+- [x] **Step 3: Write failing tests that distinguish localization from faithfulness**
 
   Assert localization reports marker/lesion/background mass and area-normalized enrichment without consuming perturbation scores; faithfulness reports fixed-score deletion/insertion curves against controls without being labeled localization; and cue-mask sensitivity is stored in a separate result group.
 
-- [ ] **Step 4: Run evaluation tests and verify failure**
+- [x] **Step 4: Run evaluation tests and verify failure**
 
   Run: `& 'D:\vit_gpu_env\Scripts\python.exe' -m unittest discover -s 'D:\skin_project\experiments\phase_g\tests' -p 'test_evaluation.py' -v`
 
   Expected: FAIL because Phase G metric functions are not implemented.
 
-- [ ] **Step 5: Implement explainers and intervention/localization metrics**
+- [x] **Step 5: Implement explainers and intervention/localization metrics**
 
   Implement Grad-CAM, Chefer, class-independent attention rollout, and occlusion separately for image-only and joint models; exact categorical clinical attribution; whole-modality and cue-level two-player Shapley using the same 200 class-stratified training donors (33 or 34 per class); 20-draw marginal cue replacements; fractional mask-to-14x14 projection; 20 area-matched localization controls per patient, 20-seed random-map and center-Gaussian controls; and the planned stability transforms. Include literal cue-absence sensitivity as a separately labeled out-of-support diagnostic, never as a gate.
 
-- [ ] **Step 6: Implement faithfulness curves with prespecified controls**
+- [x] **Step 6: Implement faithfulness curves with prespecified controls**
 
   Evaluate deletion/insertion at 5% patch steps using the saved background-only canvas and Gaussian blur sensitivity baseline. Compare target-specific Grad-CAM/Chefer/occlusion rankings with 20 random orders and center-Gaussian rankings. Keep image-only score and joint fusion score results separate; describe attention rollout as a class-independent control only.
 
-- [ ] **Step 7: Run focused tests and require PASS**
+- [x] **Step 7: Run focused tests and require PASS**
 
-  Run `test_explain.py` and `test_evaluation.py`; require PASS for target invariance, mask projection, exact Shapley efficiency, intervention-only output changes, faithfulness endpoints, control reproducibility, and distinct output schemas. Validate 2,000 patient-level bootstrap replicates for descriptive intervals and 10,000 patient-level sign flips with add-one correction for prespecified paired continuous contrasts. Apply Holm within: the two cue-mask comparisons; separate four-method marker and lesion localization families for each of image-only and joint targets; and separate six-contrast families for image-only deletion, image-only insertion, joint-fusion deletion, and joint-fusion insertion (three target-specific methods against random-order and center-Gaussian controls). Stability is descriptive with intervals and no hypothesis tests. Do not treat replacement draws or patches as independent patients.
+  Run `test_explain.py` and `test_evaluation.py`; require PASS for target invariance, mask projection, exact Shapley efficiency, intervention-only output changes, faithfulness endpoints, control reproducibility, and distinct output schemas. Validate 2,000 patient-level bootstrap replicates for descriptive intervals and 10,000 patient-level sign flips with add-one correction for prespecified paired continuous contrasts. Apply Holm within: the two cue-mask comparisons; separate four-method marker and lesion localization families for each of image-only and joint targets; and separate six-contrast families for image-only deletion, image-only insertion, joint-fusion deletion, and joint-fusion insertion (three target-specific methods against random-order and center-Gaussian controls). Stability is descriptive with intervals and no hypothesis tests. Do not treat replacement draws or patches as independent patients. **Verified:** all 35 Phase G tests pass, including the default 2,000 bootstrap and 10,000 sign-flip implementations; unit-test fixtures are isolated synthetic training-partition patients, not the held-out pilot.
 
 - [ ] **Step 8: Commit the explanation/evaluation deliverable**
 

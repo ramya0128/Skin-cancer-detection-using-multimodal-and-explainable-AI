@@ -3,7 +3,19 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import torch
+from PIL import Image, ImageFilter
+from scipy.stats import rankdata
+from skimage.metrics import structural_similarity
 
+from experiments.phase_g.explain import (
+    _device,
+    _image_tensor,
+    _logits,
+    _validate_temperature,
+    compute_image_maps,
+)
+from experiments.phase_g.generate import SyntheticPatient
 from experiments.phase_g.model import fit_temperature
 
 
@@ -320,3 +332,610 @@ def primary_nll_inference(
             and all(bound > threshold for bound in lower_bounds.values())
         ),
     }
+
+
+def _fractional_patch_masks(masks: np.ndarray) -> np.ndarray:
+    masks = np.asarray(masks)
+    if masks.ndim != 3:
+        raise ValueError("masks must have shape (N, H, W)")
+    if masks.shape[1:] == (224, 224):
+        return masks.astype(np.float32).reshape(-1, 14, 16, 14, 16).mean(axis=(2, 4))
+    if masks.shape[1:] == (14, 14):
+        values = masks.astype(np.float32)
+        if not np.isfinite(values).all() or np.any((values < 0) | (values > 1)):
+            raise ValueError("fractional patch masks must lie in [0, 1]")
+        return values
+    raise ValueError("masks must be 224x224 pixels or 14x14 fractional patches")
+
+
+def _random_patch_mask(
+    occupied: np.ndarray, rng: np.random.Generator, side: int = 16
+) -> np.ndarray:
+    integral = np.pad(occupied.astype(np.int32), ((1, 0), (1, 0))).cumsum(0).cumsum(1)
+    for _ in range(10000):
+        top = int(rng.integers(0, occupied.shape[0] - side + 1))
+        left = int(rng.integers(0, occupied.shape[1] - side + 1))
+        bottom, right = top + side, left + side
+        area = (
+            integral[bottom, right]
+            - integral[top, right]
+            - integral[bottom, left]
+            + integral[top, left]
+        )
+        if area == 0:
+            mask = np.zeros_like(occupied, dtype=bool)
+            mask[top:bottom, left:right] = True
+            return mask
+    raise RuntimeError("could not sample an area-matched marker control")
+
+
+def _random_lesion_translation(
+    lesion: np.ndarray,
+    occupied: np.ndarray,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    ys, xs = np.nonzero(lesion)
+    if len(ys) == 0:
+        raise ValueError("lesion masks cannot be empty")
+    top_min, top_max = int(ys.min()), int(ys.max())
+    left_min, left_max = int(xs.min()), int(xs.max())
+    relative_y, relative_x = ys - top_min, xs - left_min
+    height, width = top_max - top_min + 1, left_max - left_min + 1
+    for _ in range(10000):
+        top = int(rng.integers(0, lesion.shape[0] - height + 1))
+        left = int(rng.integers(0, lesion.shape[1] - width + 1))
+        if np.any(occupied[top + relative_y, left + relative_x]):
+            continue
+        translated = np.zeros_like(lesion, dtype=bool)
+        translated[top + relative_y, left + relative_x] = True
+        return translated
+    raise RuntimeError("could not sample an area-matched lesion translation")
+
+
+def _center_gaussian(size: int = 14, sigma: float = 3.5) -> np.ndarray:
+    coordinates = np.arange(size, dtype=np.float64)
+    yy, xx = np.meshgrid(coordinates, coordinates, indexing="ij")
+    center = (size - 1) / 2.0
+    values = np.exp(-((xx - center) ** 2 + (yy - center) ** 2) / (2 * sigma**2))
+    return (values / values.max()).astype(np.float32)
+
+
+def build_localization_controls(
+    masks: dict[str, np.ndarray], seed: int, repeats: int = 20
+) -> dict[str, np.ndarray]:
+    if set(masks) != {"lesion", "marker"}:
+        raise ValueError("masks must contain exactly lesion and marker")
+    lesion = np.asarray(masks["lesion"], dtype=bool)
+    marker = np.asarray(masks["marker"], dtype=bool)
+    if lesion.ndim != 3 or lesion.shape != marker.shape or lesion.shape[1:] != (224, 224):
+        raise ValueError("lesion and marker masks must align as (N, 224, 224)")
+    if repeats < 1:
+        raise ValueError("repeats must be positive")
+    if np.any(lesion & marker):
+        raise ValueError("lesion and marker masks must be disjoint")
+    rng = np.random.default_rng(seed)
+    marker_controls = np.empty((len(lesion), repeats, 14, 14), dtype=np.float32)
+    lesion_controls = np.empty_like(marker_controls)
+    random_maps = rng.random((len(lesion), repeats, 14, 14), dtype=np.float32)
+    for row in range(len(lesion)):
+        occupied = lesion[row] | marker[row]
+        for repeat in range(repeats):
+            marker_controls[row, repeat] = _fractional_patch_masks(
+                _random_patch_mask(occupied, rng)[None, ...]
+            )[0]
+            lesion_controls[row, repeat] = _fractional_patch_masks(
+                _random_lesion_translation(
+                    lesion[row], occupied, rng
+                )[None, ...]
+            )[0]
+    return {
+        "marker_random_masks": marker_controls,
+        "lesion_random_masks": lesion_controls,
+        "random_maps": random_maps,
+        "center_gaussian": _center_gaussian(),
+    }
+
+
+def _region_mass(attribution: np.ndarray, region: np.ndarray) -> np.ndarray:
+    totals = attribution.sum(axis=(1, 2))
+    numerator = (attribution * region).sum(axis=(1, 2))
+    return np.divide(numerator, totals, out=np.zeros_like(numerator), where=totals > 0)
+
+
+def localization_metrics(
+    maps: np.ndarray,
+    masks: dict[str, np.ndarray],
+    controls: dict[str, np.ndarray],
+    patient_ids: np.ndarray,
+) -> dict[str, np.ndarray]:
+    attribution = np.asarray(maps, dtype=np.float64)
+    patient_ids = np.asarray(patient_ids)
+    if attribution.ndim != 3 or attribution.shape[1:] != (14, 14):
+        raise ValueError("maps must have shape (N, 14, 14)")
+    if not np.isfinite(attribution).all() or np.any(attribution < 0):
+        raise ValueError("maps must be finite and nonnegative")
+    if patient_ids.shape != (len(attribution),):
+        raise ValueError("patient_ids must align with maps")
+    lesion = _fractional_patch_masks(masks["lesion"])
+    marker = _fractional_patch_masks(masks["marker"])
+    if lesion.shape != attribution.shape or marker.shape != attribution.shape:
+        raise ValueError("masks and maps must have the same patient rows")
+    if np.any(lesion + marker > 1.0 + 1e-6):
+        raise ValueError("lesion and marker masks overlap")
+    background = np.clip(1.0 - lesion - marker, 0.0, 1.0)
+    totals = attribution.sum(axis=(1, 2), keepdims=True)
+    normalized = np.divide(
+        attribution,
+        totals,
+        out=np.zeros_like(attribution),
+        where=totals > 0,
+    )
+    marker_mass = _region_mass(normalized, marker)
+    lesion_mass = _region_mass(normalized, lesion)
+    background_mass = _region_mass(normalized, background)
+    marker_area = marker.mean(axis=(1, 2))
+    lesion_area = lesion.mean(axis=(1, 2))
+    peak = np.argmax(normalized.reshape(len(normalized), -1), axis=1)
+    rows = np.arange(len(normalized))
+    marker_random = np.asarray(controls["marker_random_masks"], dtype=np.float64)
+    lesion_random = np.asarray(controls["lesion_random_masks"], dtype=np.float64)
+    random_maps = np.asarray(controls["random_maps"], dtype=np.float64)
+    if (
+        marker_random.ndim != 4
+        or lesion_random.shape != marker_random.shape
+        or marker_random.shape[0] != len(normalized)
+        or marker_random.shape[2:] != (14, 14)
+    ):
+        raise ValueError("area-matched controls must have shape (N, repeats, 14, 14)")
+    if random_maps.shape != marker_random.shape:
+        raise ValueError("random maps must match the area-matched control shape")
+    marker_controls = np.einsum("nhw,nrhw->nr", normalized, marker_random)
+    lesion_controls = np.einsum("nhw,nrhw->nr", normalized, lesion_random)
+    random_normalized = np.divide(
+        random_maps,
+        random_maps.sum(axis=(2, 3), keepdims=True),
+        out=np.zeros_like(random_maps),
+        where=random_maps.sum(axis=(2, 3), keepdims=True) > 0,
+    )
+    random_marker_mass = np.einsum("nrhw,nhw->nr", random_normalized, marker)
+    random_lesion_mass = np.einsum("nrhw,nhw->nr", random_normalized, lesion)
+    center = np.asarray(controls["center_gaussian"], dtype=np.float64)
+    if center.shape != (14, 14) or not np.isfinite(center).all() or np.any(center < 0):
+        raise ValueError("center_gaussian must be a finite nonnegative 14x14 map")
+    center /= max(float(center.sum()), np.finfo(np.float64).tiny)
+    center_marker_mass = np.einsum("hw,nhw->n", center, marker)
+    center_lesion_mass = np.einsum("hw,nhw->n", center, lesion)
+    return {
+        "patient_ids": patient_ids.copy(),
+        "marker_mass": marker_mass.astype(np.float32),
+        "lesion_mass": lesion_mass.astype(np.float32),
+        "background_mass": background_mass.astype(np.float32),
+        "marker_area_fraction": marker_area.astype(np.float32),
+        "lesion_area_fraction": lesion_area.astype(np.float32),
+        "marker_area_enrichment": np.divide(
+            marker_mass, marker_area, out=np.zeros_like(marker_mass), where=marker_area > 0
+        ).astype(np.float32),
+        "lesion_area_enrichment": np.divide(
+            lesion_mass, lesion_area, out=np.zeros_like(lesion_mass), where=lesion_area > 0
+        ).astype(np.float32),
+        "marker_pointing_game": (marker.reshape(len(marker), -1)[rows, peak] > 0).astype(np.float32),
+        "lesion_pointing_game": (lesion.reshape(len(lesion), -1)[rows, peak] > 0).astype(np.float32),
+        "marker_random_mass": marker_controls.astype(np.float32),
+        "lesion_random_mass": lesion_controls.astype(np.float32),
+        "random_map_marker_mass": random_marker_mass.astype(np.float32),
+        "random_map_lesion_mass": random_lesion_mass.astype(np.float32),
+        "center_gaussian_marker_mass": center_marker_mass.astype(np.float32),
+        "center_gaussian_lesion_mass": center_lesion_mass.astype(np.float32),
+        "outcome_type": np.asarray("localization"),
+    }
+
+
+def _as_uint_or_float(image: torch.Tensor) -> torch.Tensor:
+    if image.dtype == torch.uint8:
+        return image.float().div(255.0)
+    return image.float()
+
+
+def _gaussian_blur_batch(images: torch.Tensor, radius: float) -> torch.Tensor:
+    blurred = []
+    for image in images:
+        pixels = (_as_uint_or_float(image).cpu().clamp(0, 1) * 255).round().byte()
+        array = pixels.permute(1, 2, 0).contiguous().numpy()
+        result = Image.fromarray(array).filter(ImageFilter.GaussianBlur(radius=radius))
+        blurred.append(
+            torch.from_numpy(np.asarray(result).copy()).permute(2, 0, 1).float().div_(255.0)
+        )
+    return torch.stack(blurred)
+
+
+def _predict_target_scores(
+    model: torch.nn.Module,
+    model_kind: str,
+    images: torch.Tensor,
+    categories: torch.Tensor | None,
+    targets: torch.Tensor,
+    batch_size: int,
+    temperature: float,
+) -> np.ndarray:
+    device = _device(model)
+    scores = []
+    with torch.no_grad():
+        for start in range(0, len(images), batch_size):
+            end = min(start + batch_size, len(images))
+            batch = _image_tensor(images[start:end], device)
+            batch_categories = None if categories is None else categories[start:end].to(device)
+            logits = _logits(model, model_kind, batch, batch_categories)
+            probabilities = torch.softmax(logits / temperature, dim=1)
+            scores.extend(
+                probabilities.gather(1, targets[start:end].to(device)[:, None])
+                .squeeze(1)
+                .cpu()
+                .numpy()
+                .tolist()
+            )
+    return np.asarray(scores, dtype=np.float64)
+
+
+def _ranked_variants(
+    original: torch.Tensor,
+    baseline: torch.Tensor,
+    order: np.ndarray,
+    patch_counts: np.ndarray,
+) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+    deletion = []
+    insertion = []
+    for count in patch_counts:
+        deleted = original.clone()
+        inserted = baseline.clone()
+        for patch in order[:int(count)]:
+            top, left = divmod(int(patch), 14)
+            top *= 16
+            left *= 16
+            deleted[:, top:top + 16, left:left + 16] = baseline[
+                :, top:top + 16, left:left + 16
+            ]
+            inserted[:, top:top + 16, left:left + 16] = original[
+                :, top:top + 16, left:left + 16
+            ]
+        deletion.append(deleted)
+        insertion.append(inserted)
+    return deletion, insertion
+
+
+def _curves_for_order(
+    model: torch.nn.Module,
+    model_kind: str,
+    original: torch.Tensor,
+    baseline: torch.Tensor,
+    category: torch.Tensor | None,
+    target: int,
+    order: np.ndarray,
+    patch_counts: np.ndarray,
+    batch_size: int,
+    temperature: float,
+) -> np.ndarray:
+    deletion, insertion = _ranked_variants(original, baseline, order, patch_counts)
+    variants = torch.stack(deletion + insertion)
+    categories = None if category is None else category.expand(len(variants))
+    targets = torch.full((len(variants),), int(target), dtype=torch.long)
+    scores = _predict_target_scores(
+        model, model_kind, variants, categories, targets, batch_size, temperature
+    )
+    return scores.reshape(2, len(patch_counts)).astype(np.float32)
+
+
+def deletion_insertion_metrics(
+    model: torch.nn.Module,
+    model_kind: str,
+    images: torch.Tensor,
+    categories: np.ndarray | None,
+    background_canvases: torch.Tensor,
+    maps: dict[str, np.ndarray],
+    targets: np.ndarray,
+    config: dict[str, object],
+) -> dict[str, np.ndarray]:
+    model.eval()
+    if model_kind not in {"image_only", "joint"}:
+        raise ValueError("model_kind must be 'image_only' or 'joint'")
+    if images.shape != background_canvases.shape or images.ndim != 4:
+        raise ValueError("images and background canvases must be aligned batches")
+    n = len(images)
+    targets = np.asarray(targets, dtype=np.int64)
+    if targets.shape != (n,) or np.any((targets < 0) | (targets >= CLASS_COUNT)):
+        raise ValueError("targets must align with images and lie in [0, 5]")
+    if not maps:
+        raise ValueError("at least one map is required")
+    normalized_maps = {}
+    for name, value in maps.items():
+        scores = np.asarray(value, dtype=np.float64)
+        if scores.shape != (n, 14, 14) or not np.isfinite(scores).all():
+            raise ValueError(f"{name} must be a finite (N, 14, 14) map")
+        normalized_maps[name] = scores
+    category_tensor = None
+    if model_kind == "joint":
+        if categories is None:
+            raise ValueError("joint faithfulness requires fixed clinical categories")
+        category_tensor = torch.as_tensor(categories, dtype=torch.long)
+        if category_tensor.shape != (n,) or torch.any(
+            (category_tensor < 0) | (category_tensor >= CLASS_COUNT)
+        ):
+            raise ValueError("joint clinical categories must align and lie in [0, 5]")
+    elif categories is not None:
+        raise ValueError("image-only faithfulness cannot consume clinical categories")
+
+    seed = int(config.get("seed", 20261119))
+    random_count = int(config.get("random_order_count", 20))
+    batch_size = int(config.get("curve_batch_size", 64))
+    blur_radius = float(config.get("gaussian_blur_radius", 6.0))
+    if random_count < 1 or batch_size < 1 or not np.isfinite(blur_radius) or blur_radius <= 0:
+        raise ValueError("random count, batch size, and blur radius must be positive")
+    temperature = _validate_temperature(float(config.get("temperature", 1.0)))
+    patch_counts = np.round(np.linspace(0, 196, 21)).astype(np.int64)
+    baseline_names = ("background_canvas", "gaussian_blur")
+    method_names = tuple(normalized_maps)
+    curves = np.empty((n, len(method_names), 2, 2, len(patch_counts)), dtype=np.float32)
+    random_curves = np.empty((n, random_count, 2, 2, len(patch_counts)), dtype=np.float32)
+    center_curves = np.empty((n, 2, 2, len(patch_counts)), dtype=np.float32)
+    center_map = _center_gaussian()
+    random_seeds = np.random.SeedSequence(seed).generate_state(random_count)
+    for row in range(n):
+        original = _image_tensor(images[row:row + 1], torch.device("cpu"))[0]
+        background = _image_tensor(background_canvases[row:row + 1], torch.device("cpu"))[0]
+        blurred = _gaussian_blur_batch(original.unsqueeze(0), blur_radius)[0]
+        baselines = (background, blurred)
+        category = None if category_tensor is None else category_tensor[row:row + 1]
+        target = int(targets[row])
+        orders = [
+            np.argsort(-value[row].reshape(-1), kind="stable")
+            for value in normalized_maps.values()
+        ]
+        random_orders = [
+            np.random.default_rng(int(order_seed)).permutation(196).astype(np.int64)
+            for order_seed in random_seeds
+        ]
+        center_order = np.argsort(-center_map.reshape(-1), kind="stable")
+        for method_index, order in enumerate(orders):
+            for baseline_index, baseline in enumerate(baselines):
+                curves[row, method_index, baseline_index] = _curves_for_order(
+                    model, model_kind, original, baseline, category, target,
+                    order, patch_counts, batch_size, temperature,
+                )
+        for random_index, order in enumerate(random_orders):
+            for baseline_index, baseline in enumerate(baselines):
+                random_curves[row, random_index, baseline_index] = _curves_for_order(
+                    model, model_kind, original, baseline, category, target,
+                    order, patch_counts, batch_size, temperature,
+                )
+        for baseline_index, baseline in enumerate(baselines):
+            center_curves[row, baseline_index] = _curves_for_order(
+                model, model_kind, original, baseline, category, target,
+                center_order, patch_counts, batch_size, temperature,
+            )
+    auc = np.trapezoid(curves, x=np.linspace(0, 1, len(patch_counts)), axis=-1)
+    random_auc = np.trapezoid(
+        random_curves, x=np.linspace(0, 1, len(patch_counts)), axis=-1
+    )
+    center_auc = np.trapezoid(
+        center_curves, x=np.linspace(0, 1, len(patch_counts)), axis=-1
+    )
+    return {
+        "patient_count": np.asarray(n, dtype=np.int64),
+        "target_classes": targets,
+        "model_kind": np.asarray(model_kind),
+        "method_names": np.asarray(method_names),
+        "baseline_names": np.asarray(baseline_names),
+        "directions": np.asarray(["deletion", "insertion"]),
+        "patch_counts": patch_counts,
+        "curves": curves,
+        "auc": auc.astype(np.float32),
+        "random_order_curves": random_curves,
+        "random_order_auc": random_auc.astype(np.float32),
+        "center_gaussian_curves": center_curves,
+        "center_gaussian_auc": center_auc.astype(np.float32),
+        "random_order_seeds": random_seeds.astype(np.uint32),
+        "temperature": np.asarray(temperature, dtype=np.float64),
+        "outcome_type": np.asarray("faithfulness"),
+        "attention_rollout_role": np.asarray("class_independent_control"),
+    }
+
+
+def _brightness(images: torch.Tensor, factor: float) -> torch.Tensor:
+    if images.dtype == torch.uint8:
+        raw = images.float().div(255.0)
+    else:
+        raw = images.float()
+    if not np.isfinite(factor) or factor <= 0:
+        raise ValueError("brightness factors must be finite and positive")
+    return (raw * factor).clamp(0.0, 1.0)
+
+
+def _spearman_map(first: np.ndarray, second: np.ndarray) -> float:
+    first_rank = rankdata(first.reshape(-1), method="average")
+    second_rank = rankdata(second.reshape(-1), method="average")
+    if first_rank.std() == 0 or second_rank.std() == 0:
+        return float("nan")
+    return float(np.corrcoef(first_rank, second_rank)[0, 1])
+
+
+def stability_metrics(
+    model: torch.nn.Module,
+    model_kind: str,
+    images: torch.Tensor,
+    categories: np.ndarray | None,
+    maps: dict[str, np.ndarray],
+    targets: np.ndarray,
+    config: dict[str, object],
+) -> dict[str, np.ndarray]:
+    model.eval()
+    if model_kind not in {"image_only", "joint"}:
+        raise ValueError("model_kind must be 'image_only' or 'joint'")
+    targets = np.asarray(targets, dtype=np.int64)
+    n = len(images)
+    if targets.shape != (n,):
+        raise ValueError("targets must align with images")
+    map_names = tuple(maps)
+    if not map_names:
+        raise ValueError("at least one reference map is required")
+    for name, value in maps.items():
+        if np.asarray(value).shape != (n, 14, 14):
+            raise ValueError(f"{name} maps must have shape (N, 14, 14)")
+    if model_kind == "joint":
+        if categories is None or np.asarray(categories).shape != (n,):
+            raise ValueError("joint stability requires aligned fixed categories")
+        category_tensor = torch.as_tensor(categories, dtype=torch.long)
+    else:
+        if categories is not None:
+            raise ValueError("image-only stability cannot consume clinical categories")
+        category_tensor = None
+    factors = config.get("brightness_factors", [0.9, 1.1])
+    if list(factors) != [0.9, 1.1]:
+        raise ValueError("approved stability brightness factors are exactly 0.9 and 1.1")
+    transforms: list[tuple[str, torch.Tensor, bool]] = [
+        ("horizontal_flip", torch.flip(images, dims=(-1,)), True)
+    ]
+    transforms.extend(
+        (f"brightness_{factor:.1f}", _brightness(images, float(factor)), False)
+        for factor in factors
+    )
+    device = _device(model)
+    temperature = _validate_temperature(float(config.get("temperature", 1.0)))
+    batch_size = int(config.get("image_batch_size", 16))
+    if batch_size < 1:
+        raise ValueError("image_batch_size must be positive")
+    original_probabilities = []
+    with torch.no_grad():
+        for start in range(0, n, batch_size):
+            end = min(start + batch_size, n)
+            batch = _image_tensor(images[start:end], device)
+            batch_categories = None if category_tensor is None else category_tensor[start:end].to(device)
+            original_probabilities.append(
+                torch.softmax(
+                    _logits(model, model_kind, batch, batch_categories) / temperature,
+                    dim=1,
+                )
+                .cpu().numpy()
+            )
+    original_probabilities_np = np.concatenate(original_probabilities, axis=0)
+    n_transforms = len(transforms)
+    prediction_changed = np.zeros((n_transforms, n), dtype=bool)
+    valid_subset = np.zeros_like(prediction_changed)
+    spearman = np.full((n_transforms, n, len(map_names)), np.nan, dtype=np.float32)
+    ssim = np.full_like(spearman, np.nan)
+    transformed_probabilities = np.empty(
+        (n_transforms, n, CLASS_COUNT), dtype=np.float32
+    )
+    for transform_index, (name, transformed, flipped) in enumerate(transforms):
+        probabilities = []
+        with torch.no_grad():
+            for start in range(0, n, batch_size):
+                end = min(start + batch_size, n)
+                batch = _image_tensor(transformed[start:end], device)
+                batch_categories = (
+                    None if category_tensor is None else category_tensor[start:end].to(device)
+                )
+                probabilities.append(
+                    torch.softmax(
+                        _logits(model, model_kind, batch, batch_categories) / temperature,
+                        dim=1,
+                    ).cpu().numpy()
+                )
+        transformed_probabilities[transform_index] = np.concatenate(probabilities, axis=0)
+        prediction_changed[transform_index] = (
+            original_probabilities_np.argmax(axis=1)
+            != transformed_probabilities[transform_index].argmax(axis=1)
+        )
+        valid = ~prediction_changed[transform_index]
+        valid_subset[transform_index] = valid
+        transformed_maps = compute_image_maps(
+            model,
+            model_kind,
+            transformed,
+            targets,
+            categories,
+            map_names,
+            batch_size,
+            temperature,
+        )
+        if flipped:
+            transformed_maps = {
+                key: value[:, :, ::-1].copy() for key, value in transformed_maps.items()
+            }
+        for row in np.flatnonzero(valid):
+            for map_index, key in enumerate(map_names):
+                reference = np.asarray(maps[key][row], dtype=np.float64)
+                candidate = transformed_maps[key][row].astype(np.float64)
+                spearman[transform_index, row, map_index] = _spearman_map(
+                    reference, candidate
+                )
+                ssim[transform_index, row, map_index] = structural_similarity(
+                    reference,
+                    candidate,
+                    data_range=1.0,
+                    win_size=7,
+                    gaussian_weights=False,
+                )
+    return {
+        "transform_names": np.asarray([item[0] for item in transforms]),
+        "map_names": np.asarray(map_names),
+        "target_classes": targets,
+        "temperature": np.asarray(temperature, dtype=np.float64),
+        "original_probabilities": original_probabilities_np.astype(np.float32),
+        "transformed_probabilities": transformed_probabilities,
+        "prediction_changed": prediction_changed,
+        "valid_subset": valid_subset,
+        "spearman": spearman,
+        "ssim": ssim,
+        "outcome_type": np.asarray("stability"),
+    }
+
+
+def bootstrap_mean_interval(
+    values: np.ndarray,
+    replicates: int = 2000,
+    seed: int = 20261119,
+) -> tuple[float, float]:
+    values = np.asarray(values, dtype=np.float64)
+    if values.ndim != 1 or values.size == 0 or not np.isfinite(values).all():
+        raise ValueError("values must be a nonempty finite patient-level vector")
+    if replicates < 1:
+        raise ValueError("replicates must be positive")
+    rng = np.random.default_rng(seed)
+    estimates = np.empty(replicates, dtype=np.float64)
+    chunk = max(1, min(256, replicates))
+    for start in range(0, replicates, chunk):
+        end = min(start + chunk, replicates)
+        indices = rng.integers(0, len(values), size=(end - start, len(values)))
+        estimates[start:end] = values[indices].mean(axis=1)
+    lower, upper = np.quantile(estimates, [0.025, 0.975])
+    return float(lower), float(upper)
+
+
+def paired_signflip_p(
+    values_a: np.ndarray,
+    values_b: np.ndarray,
+    draws: int = 10000,
+    seed: int = 20261119,
+) -> float:
+    values_a = np.asarray(values_a, dtype=np.float64)
+    values_b = np.asarray(values_b, dtype=np.float64)
+    if (
+        values_a.ndim != 1
+        or values_a.shape != values_b.shape
+        or values_a.size == 0
+        or not np.isfinite(values_a).all()
+        or not np.isfinite(values_b).all()
+    ):
+        raise ValueError("paired inputs must be aligned finite patient-level vectors")
+    if draws < 1:
+        raise ValueError("draws must be positive")
+    differences = values_a - values_b
+    observed = abs(float(differences.mean()))
+    rng = np.random.default_rng(seed)
+    exceedances = 0
+    chunk = max(1, min(256, draws))
+    for start in range(0, draws, chunk):
+        count = min(chunk, draws - start)
+        signs = rng.choice(np.asarray([-1.0, 1.0]), size=(count, len(differences)))
+        null = np.abs((signs * differences).mean(axis=1))
+        exceedances += int(np.count_nonzero(null >= observed))
+    return float((exceedances + 1) / (draws + 1))

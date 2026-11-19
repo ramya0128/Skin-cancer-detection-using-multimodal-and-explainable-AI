@@ -90,8 +90,12 @@ class _JointModel(nn.Module):
     def forward(self, images: torch.Tensor, categories: torch.Tensor) -> torch.Tensor:
         if categories.dtype != torch.long:
             raise TypeError("clinical categories must be integer indices")
+        if torch.any((categories < 0) | (categories > 6)):
+            raise ValueError("joint clinical categories must be in [0, 6]")
         image_features = self.image_encoder(images)
-        clinical_features = self.clinical_embedding(categories)
+        masked = categories == 6
+        clinical_features = self.clinical_embedding(categories.clamp_max(5))
+        clinical_features = clinical_features.masked_fill(masked.unsqueeze(1), 0.0)
         return self.fusion(torch.cat((image_features, clinical_features), dim=1))
 
 

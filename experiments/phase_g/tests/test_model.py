@@ -56,6 +56,15 @@ class PhaseGModelTests(unittest.TestCase):
         with self.assertRaises((TypeError, RuntimeError, ValueError)):
             model(torch.tensor([0.0, 5.0], dtype=torch.float32))
 
+    def test_joint_model_accepts_reserved_masked_category_without_embedding_lookup(self):
+        model = build_model("joint", load_config())
+        images = torch.zeros((1, 3, 224, 224), dtype=torch.float32)
+
+        logits = model(images, torch.tensor([6], dtype=torch.long))
+
+        self.assertEqual(tuple(logits.shape), (1, 6))
+        self.assertTrue(torch.isfinite(logits).all())
+
     def test_joint_objective_is_only_six_class_cross_entropy(self):
         logits = torch.tensor(
             [[2.0, 0.0, -1.0, -2.0, -3.0, -4.0], [0.0, 2.0, -1.0, -2.0, -3.0, -4.0]]

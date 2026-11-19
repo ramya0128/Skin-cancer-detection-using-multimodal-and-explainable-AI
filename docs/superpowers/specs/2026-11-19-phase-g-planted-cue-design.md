@@ -340,8 +340,10 @@ natural-distribution incremental-NLL estimand.
 Also report a literal cue-absence sensitivity analysis (restore the
 pre-marker background pixels; use a clinical `MASKED` token) separately and
 label it as an out-of-support intervention unless training contains masked
-examples. It does not replace the primary gate and must not be used to pass
-or fail it.
+examples. In the implementation, reserved category index 6 maps
+deterministically to a zero clinical feature vector; it is never trained or
+calibrated. This analysis does not replace the primary gate and must not be
+used to pass or fail it.
 
 ## Condition semantics
 
@@ -447,6 +449,12 @@ whole-modality Shapley, and cue-level Shapley answer different questions. Do
 not call one the other. The exact modality game explains the joint model
 under its specified donor-background intervention, not an intrinsic or
 data-independent "importance" of a modality.
+
+Apply each model's frozen validation-only temperature to all probability-valued
+explanation and intervention outcomes (clinical category values, occlusion
+scores, Shapley coalition values, cue sensitivity, deletion/insertion scores,
+and stability probabilities). Grad-CAM and Chefer target the fixed-class
+logit; temperature is not fitted or changed using held-out patients.
 
 ## Evaluation: separate constructs and measures
 
