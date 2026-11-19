@@ -1,0 +1,272 @@
+{
+  "schema_version": 1,
+  "status": "approved_balanced_pilot_only",
+  "proposal_version": 2,
+  "experiment_id": "phase_g_balanced_085_085_pilot_v1",
+  "master_seed": 20261119,
+  "pilot_condition": "balanced",
+  "authorized_conditions": [
+    "balanced"
+  ],
+  "labels": {
+    "values": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "distribution": "uniform",
+    "semantics": "synthetic_indices_only_not_real_PAD_diagnoses"
+  },
+  "dataset": {
+    "patient_count": 12000,
+    "class_counts": {
+      "train_per_class": 1400,
+      "validation_model_selection_per_class": 150,
+      "validation_calibration_per_class": 150,
+      "test_per_class": 300
+    },
+    "split": {
+      "proportions": [
+        0.7,
+        0.15,
+        0.15
+      ],
+      "validation_subsets_disjoint": true,
+      "split_before_rendering": true,
+      "group_variants_by_parent_patient": true
+    }
+  },
+  "random_streams": {
+    "patient_stream_derivation": "sha256_seed_from_master_seed_patient_id_and_stream_name",
+    "names": [
+      "split",
+      "opaque_patient_id",
+      "lesion_geometry",
+      "lesion_texture",
+      "background",
+      "marker_location",
+      "image_cue_noise",
+      "clinical_cue_noise",
+      "model_initialization",
+      "explanation_baselines"
+    ]
+  },
+  "balanced_pilot": {
+    "image_cue_reliability": 0.85,
+    "clinical_cue_reliability": 0.85,
+    "incorrect_cue_semantics": "uniform_among_other_five_classes",
+    "cue_noise_independence": "independent_conditional_on_label"
+  },
+  "conditions": {
+    "balanced": {
+      "status": "pilot_only",
+      "image_reliability": 0.85,
+      "clinical_reliability": 0.85,
+      "noise": "independent_uniform_other_class"
+    },
+    "image_dominant": {
+      "status": "defined_not_authorized_to_run",
+      "image_reliability": 0.95,
+      "clinical_reliability": 0.6,
+      "noise": "independent_uniform_other_class"
+    },
+    "clinical_dominant": {
+      "status": "defined_not_authorized_to_run",
+      "image_reliability": 0.6,
+      "clinical_reliability": 0.95,
+      "noise": "independent_uniform_other_class"
+    },
+    "redundant": {
+      "status": "defined_not_authorized_to_run",
+      "shared_latent_noisy_class_reliability": 0.85
+    },
+    "conflicting": {
+      "status": "defined_not_authorized_to_run",
+      "conflict_fraction": 0.5,
+      "conflict_orientation": "balanced_image_correct_vs_clinical_correct",
+      "conflict_decoy": "uniform_among_other_five_classes",
+      "non_conflict_noise": "independent_uniform_other_class_at_0.85",
+      "expected_marginal_reliability": 0.675
+    },
+    "synergistic": {
+      "status": "defined_not_authorized_to_run",
+      "construction": "image_share_U_clinical_share_Y_minus_U_mod_6",
+      "image_share_distribution": "uniform",
+      "component_corruption_probability": 0.15,
+      "component_corruption": "uniform_among_other_five_share_values",
+      "individual_share_label_information": "none_before_joint_decoding",
+      "reliability_semantics": "share_retention_not_label_accuracy"
+    }
+  },
+  "cue_replacements": {
+    "draws_per_test_patient": 20,
+    "image_cue_values": "uniform_six_categories",
+    "clinical_cue_values": "uniform_six_categories"
+  },
+  "render": {
+    "image": {
+      "height": 224,
+      "width": 224,
+      "channels": 3,
+      "dtype": "uint8"
+    },
+    "background": {
+      "base_rgb": [
+        224,
+        224,
+        224
+      ],
+      "texture_grid": [
+        16,
+        16
+      ],
+      "texture_noise_std_per_channel": 3,
+      "upsampling": "bicubic",
+      "clip": [
+        0,
+        255
+      ],
+      "save_background_only_canvas": true
+    },
+    "lesion": {
+      "geometry": "64_point_ellipse_polygon_with_radial_perturbation",
+      "center_x_pixels": [
+        96,
+        128
+      ],
+      "center_y_pixels": [
+        96,
+        128
+      ],
+      "horizontal_radius_pixels": [
+        36,
+        52
+      ],
+      "vertical_radius_pixels": [
+        36,
+        52
+      ],
+      "radial_harmonics": [
+        2,
+        3,
+        4,
+        5
+      ],
+      "radial_amplitude_each_harmonic": [
+        -0.02,
+        0.02
+      ],
+      "radial_phase_each_harmonic": [
+        0,
+        6.283185307179586
+      ],
+      "base_rgb_per_channel": [
+        100,
+        190
+      ],
+      "texture_grid": [
+        16,
+        16
+      ],
+      "texture_noise_std_per_channel": 5,
+      "texture_upsampling": "bicubic",
+      "texture_distribution": "shared_across_classes",
+      "class_dependent_render_parameters": false,
+      "save_exact_binary_mask": true
+    },
+    "exterior_marker": {
+      "patch_height_pixels": 16,
+      "patch_width_pixels": 16,
+      "allowed_top_left_pixels": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          208
+        ],
+        [
+          208,
+          0
+        ],
+        [
+          208,
+          208
+        ]
+      ],
+      "location_distribution": "uniform_independent_of_label",
+      "minimum_gap_from_lesion_pixels": 16,
+      "glyph_codewords": [
+        [
+          "1100",
+          "0000",
+          "0000",
+          "0000"
+        ],
+        [
+          "0011",
+          "0000",
+          "0000",
+          "0000"
+        ],
+        [
+          "0000",
+          "1100",
+          "0000",
+          "0000"
+        ],
+        [
+          "0000",
+          "0011",
+          "0000",
+          "0000"
+        ],
+        [
+          "0000",
+          "0000",
+          "1100",
+          "0000"
+        ],
+        [
+          "0000",
+          "0000",
+          "0011",
+          "0000"
+        ]
+      ],
+      "glyph_cell_expansion_factor": 4,
+      "foreground_rgb": [
+        0,
+        0,
+        0
+      ],
+      "background_rgb": [
+        255,
+        255,
+        255
+      ],
+      "equal_foreground_count": true,
+      "equal_luminance": true,
+      "save_exact_binary_mask": true
+    }
+  },
+  "shapley": {
+    "background_patients": 200,
+    "background_partition": "synthetic_training_only_class_stratified",
+    "efficiency_tolerance": 0.00001
+  },
+  "primary_incremental_prediction_criterion": {
+    "nll_effect_threshold": 0.1,
+    "holm_family_size": 2,
+    "one_sided_alpha": 0.05,
+    "bootstrap_replicates": 10000,
+    "bootstrap_seed": 20261123,
+    "full_accuracy_floor": 0.8
+  },
+  "output_directory": "outputs/synthetic_phase_g_v1/pilot_balanced_085_085_v1",
+  "overwrite_existing_output": false
+}
