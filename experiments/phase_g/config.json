@@ -106,6 +106,74 @@
     "image_cue_values": "uniform_six_categories",
     "clinical_cue_values": "uniform_six_categories"
   },
+  "model": {
+    "initialization": "scratch",
+    "pretrained_weights": false,
+    "image_encoder": {
+      "family": "vision_transformer",
+      "image_size": 224,
+      "patch_size": 16,
+      "encoder_layers": 4,
+      "hidden_dimension": 192,
+      "attention_heads": 3,
+      "mlp_dimension": 384
+    },
+    "image_only": {
+      "architecture": "image_encoder_plus_linear_six_class_head",
+      "train_independently": true
+    },
+    "clinical_encoder": {
+      "input": "categorical_six_way",
+      "embedding_dimension": 16,
+      "scalar_ordinal_encoding": false
+    },
+    "clinical_only": {
+      "architecture": "clinical_embedding_16_mlp_32_gelu_six_class_head",
+      "train_independently": true
+    },
+    "joint_multimodal": {
+      "architecture": "independent_image_encoder_and_clinical_embedding_then_fusion_mlp"
+    },
+    "fusion": {
+      "type": "concatenate_encoded_modalities_then_mlp",
+      "hidden_dimension": 128,
+      "activation": "GELU",
+      "dropout": 0.1,
+      "output_classes": 6
+    },
+    "loss": "six_class_cross_entropy_for_each_model",
+    "joint_auxiliary_modality_classification_losses": false,
+    "training": {
+      "optimizer": "AdamW",
+      "learning_rate": 0.0003,
+      "weight_decay": 0.0001,
+      "batch_size": 64,
+      "maximum_epochs": 50,
+      "early_stopping": {
+        "monitor": "model_selection_subset_negative_log_likelihood_for_each_model",
+        "patience": 8
+      },
+      "checkpoint_selection_partition": "validation_model_selection_subset_only",
+      "same_train_patient_ids_for_all_models": true,
+      "same_training_schedule_and_optimizer_settings": true,
+      "model_initialization_seeds": {
+        "image_only": 20261120,
+        "clinical_only": 20261121,
+        "joint": 20261122
+      },
+      "deterministic_algorithms": true
+    },
+    "calibration": {
+      "method": "scalar_temperature_scaling",
+      "fit_partition": "validation_calibration_subset_only",
+      "fit_separately_per_model": true,
+      "fit_objective": "multiclass_negative_log_likelihood",
+      "freeze_before_test_evaluation": true,
+      "test_labels_used": false,
+      "primary_nll_uses_calibrated_probabilities": true,
+      "report_uncalibrated_nll_sensitivity": true
+    }
+  },
   "render": {
     "image": {
       "height": 224,

@@ -1,0 +1,413 @@
+# Approved v2 design reference: no Phase G runner reads this file.
+# The executable balanced-only config is experiments/phase_g/config.json.
+schema_version: 1
+status: approved_design_reference_non_executable
+proposal_version: 2
+experiment_id: phase_g_balanced_085_085_pilot_v1
+master_seed: 20261119
+pilot_condition: balanced
+current_execution_authorization: true
+condition_authorized_for_execution:
+  - balanced
+
+labels:
+  values: [0, 1, 2, 3, 4, 5]
+  distribution: uniform
+  semantics: synthetic_indices_only_not_real_PAD_diagnoses
+
+dataset:
+  patient_count: 12000
+  observations_per_patient: 1
+  sample_size_rationale:
+    test_accuracy_precision_target: 0.02
+    planning_accuracy: 0.80
+    minimum_unstratified_test_n: 1537
+    selected_test_n: 1800
+    reason_for_rounding: 300_patients_per_class_for_six_class_balance
+    pooled_95_percent_margin_at_accuracy_0_80: 0.0185
+    per_class_n: 300
+    per_class_95_percent_margin_at_accuracy_0_80: 0.0453
+    nll_oracle_incremental_effect_nats: 0.361471705
+    nll_oracle_paired_sd_nats: 0.972498137
+    nll_practical_threshold_nats: 0.10
+    nll_gate_planning_familywise_alpha: 0.05
+    nll_gate_planning_power: 0.80
+    nll_approximate_minimum_n_for_oracle_effect: 109
+    nll_standard_error_at_selected_test_n: 0.022922
+    nll_approximate_80_percent_detectable_effect_nats: 0.164218
+  class_counts:
+    train_per_class: 1400
+    validation_model_selection_per_class: 150
+    validation_calibration_per_class: 150
+    test_per_class: 300
+  split:
+    proportions: [0.70, 0.15, 0.15]
+    method: deterministic_stratified_patient_id
+    validation_subsets:
+      model_selection_patients: 900
+      calibration_patients: 900
+      disjoint: true
+      same_patient_ids_for_all_models: true
+    stratify_within_class_seed_stream: true
+    assign_opaque_patient_ids_with_separate_seed_stream: true
+    split_before_rendering_or_augmentation: true
+    group_all_variants_by_parent_patient: true
+  random_streams:
+    patient_stream_derivation: seed_sequence_from_master_seed_patient_id_and_stream_name
+    independent_streams:
+      - split
+      - opaque_patient_id
+      - lesion_geometry
+      - lesion_texture
+      - background
+      - marker_location
+      - image_cue_noise
+      - clinical_cue_noise
+      - model_initialization
+      - explanation_baselines
+
+render:
+  image:
+    height: 224
+    width: 224
+    channels: 3
+    dtype: uint8
+  background:
+    base_rgb: [224, 224, 224]
+    texture_grid: [16, 16]
+    texture_noise_std_per_channel: 3
+    upsampling: bicubic
+    clip: [0, 255]
+    save_background_only_canvas: true
+  lesion:
+    geometry: 64_point_ellipse_polygon_with_radial_perturbation
+    center_x_pixels: [96, 128]
+    center_y_pixels: [96, 128]
+    horizontal_radius_pixels: [36, 52]
+    vertical_radius_pixels: [36, 52]
+    radial_harmonics: [2, 3, 4, 5]
+    radial_amplitude_each_harmonic: [-0.02, 0.02]
+    radial_phase_each_harmonic: [0, 6.283185307179586]
+    base_rgb_per_channel: [100, 190]
+    texture_grid: [16, 16]
+    texture_noise_std_per_channel: 5
+    texture_upsampling: bicubic
+    texture_distribution: shared_across_classes
+    class_dependent_render_parameters: false
+    save_exact_binary_mask: true
+  exterior_marker:
+    patch_height_pixels: 16
+    patch_width_pixels: 16
+    allowed_top_left_pixels:
+      - [0, 0]
+      - [0, 208]
+      - [208, 0]
+      - [208, 208]
+    location_distribution: uniform_independent_of_label
+    minimum_gap_from_lesion_pixels: 16
+    glyph_encoding:
+      type: six_fixed_binary_4x4_glyphs
+      codewords:
+        - ["1100", "0000", "0000", "0000"]
+        - ["0011", "0000", "0000", "0000"]
+        - ["0000", "1100", "0000", "0000"]
+        - ["0000", "0011", "0000", "0000"]
+        - ["0000", "0000", "1100", "0000"]
+        - ["0000", "0000", "0011", "0000"]
+      foreground_cells_per_glyph: 2
+      expansion_factor: 4
+      foreground_rgb: [0, 0, 0]
+      background_rgb: [255, 255, 255]
+      equal_foreground_count: true
+      equal_luminance: true
+    save_exact_binary_mask: true
+  save:
+    sample_seeds_and_render_metadata: true
+    exact_masks: packed_binary_arrays_per_split
+    images: deterministic_lossless_shards_or_regeneration_from_saved_seeds
+    hash_each_partition_and_mask_array: true
+
+balanced_pilot:
+  image_cue_reliability: 0.85
+  clinical_cue_reliability: 0.85
+  incorrect_cue_semantics: uniform_among_other_five_classes
+  cue_noise_independence: independent_conditional_on_label
+
+conditions:
+  balanced:
+    status: pilot_only
+    image_reliability: 0.85
+    clinical_reliability: 0.85
+    noise: independent_uniform_other_class
+  image_dominant:
+    status: defined_not_authorized_to_run
+    image_reliability: 0.95
+    clinical_reliability: 0.60
+    noise: independent_uniform_other_class
+  clinical_dominant:
+    status: defined_not_authorized_to_run
+    image_reliability: 0.60
+    clinical_reliability: 0.95
+    noise: independent_uniform_other_class
+  redundant:
+    status: defined_not_authorized_to_run
+    shared_latent_noisy_class_reliability: 0.85
+    image_and_clinical_cues_share_same_noisy_value: true
+  conflicting:
+    status: defined_not_authorized_to_run
+    conflict_fraction: 0.50
+    conflict_orientation: balanced_image_correct_vs_clinical_correct
+    conflict_decoy: uniform_among_other_five_classes
+    non_conflict_noise: independent_uniform_other_class_at_0.85
+    expected_marginal_reliability: 0.675
+  synergistic:
+    status: defined_not_authorized_to_run
+    construction: image_share_U_clinical_share_Y_minus_U_mod_6
+    image_share_distribution: uniform
+    component_corruption_probability: 0.15
+    component_corruption: uniform_among_other_five_share_values
+    individual_share_label_information: none_before_joint_decoding
+    reliability_semantics: share_retention_not_label_accuracy
+
+primary_mask_intervention:
+  operator: replace_cue_value_with_independent_uniform_marginal_draw
+  image: replace_glyph_only_at_fixed_marker_location
+  clinical: replace_categorical_value_only
+  draws_per_patient: 20
+  patient_level_aggregation: mean_over_draws
+  out_of_support: false
+  alters_natural_joint_cue_distribution: true
+  agreement_probability_natural: 0.727
+  agreement_probability_after_either_cue_mask: 0.1666666667
+  interpretation: intervention_sensitivity_not_natural_distribution_incremental_prediction
+  primary_difference_test: paired_patient_level_signflip_on_averaged_correctness
+  mcnemar_on_repeated_draws: false
+  role: intervention_sensitivity_diagnostics_only
+  accuracy_drop_thresholds:
+    image_cue_drop: 0.05
+    clinical_cue_drop: 0.05
+    mandatory_cue_learning_gate: false
+    report_without_overriding_nll_criterion: true
+
+primary_incremental_prediction_criterion:
+  metric: natural_distribution_joint_vs_unimodal_nll_gain
+  inputs: unmodified_heldout_test_observations
+  same_test_patients_for_all_models: true
+  effects:
+    image_increment: image_only_nll_minus_joint_nll
+    clinical_increment: clinical_only_nll_minus_joint_nll
+  probability_source: per_model_temperature_scaled_logits
+  minimum_practical_effect_nats_per_patient: 0.10
+  criterion: both_holm_adjusted_one_sided_95_percent_lower_bounds_exceed_threshold
+  multiplicity_family_size: 2
+  null_hypothesis_per_contrast: delta_less_than_or_equal_to_0.10
+  full_accuracy_floor: 0.80
+  mask_nll_is_not_the_incremental_prediction_criterion: true
+
+literal_absence_sensitivity:
+  status: secondary_not_gate
+  image: restore_original_unmarked_background_pixels
+  clinical: dedicated_masked_token
+  report_as_out_of_support_unless_masked_examples_are_in_training: true
+
+model:
+  initialization: scratch
+  pretrained_weights: false
+  image_encoder:
+    family: vision_transformer
+    image_size: 224
+    patch_size: 16
+    encoder_layers: 4
+    hidden_dimension: 192
+    attention_heads: 3
+    mlp_dimension: 384
+  image_only:
+    architecture: image_encoder_plus_linear_six_class_head
+    train_independently: true
+  clinical_encoder:
+    input: categorical_six_way
+    embedding_dimension: 16
+    scalar_ordinal_encoding: false
+  clinical_only:
+    architecture: clinical_embedding_16_mlp_32_gelu_six_class_head
+    train_independently: true
+  joint_multimodal:
+    architecture: independent_image_encoder_and_clinical_embedding_then_fusion_mlp
+  fusion:
+    type: concatenate_encoded_modalities_then_mlp
+    hidden_dimension: 128
+    activation: GELU
+    dropout: 0.1
+    output_classes: 6
+  loss: six_class_cross_entropy_for_each_model
+  joint_auxiliary_modality_classification_losses: false
+  training:
+    optimizer: AdamW
+    learning_rate: 0.0003
+    weight_decay: 0.0001
+    batch_size: 64
+    maximum_epochs: 50
+    early_stopping:
+      monitor: model_selection_subset_negative_log_likelihood_for_each_model
+      patience: 8
+    checkpoint_selection_partition: validation_model_selection_subset_only
+    same_train_patient_ids_for_all_models: true
+    same_training_schedule_and_optimizer_settings: true
+    model_initialization_seeds:
+      image_only: 20261120
+      clinical_only: 20261121
+      joint_multimodal: 20261122
+    deterministic_algorithms: true
+  calibration:
+    method: scalar_temperature_scaling
+    fit_partition: validation_calibration_subset_only
+    fit_separately_per_model: true
+    fit_objective: multiclass_negative_log_likelihood
+    freeze_before_test_evaluation: true
+    test_labels_used: false
+    primary_nll_uses_calibrated_probabilities: true
+    report_uncalibrated_nll_sensitivity: true
+
+explainers:
+  image_only_model:
+    - gradcam_image_only_class_score
+    - chefer_image_only_class_score
+    - attention_rollout_class_independent_control
+    - occlusion_image_only_class_score
+  clinical_only_model:
+    - exact_categorical_intervention_attribution
+    - reference_distribution_uniform_over_six_categories
+  joint_multimodal_model:
+    - gradcam_joint_fusion_score_through_image_encoder
+    - chefer_joint_fusion_score_through_image_encoder
+    - attention_rollout_class_independent_control
+    - occlusion_joint_fusion_score
+    - exact_two_player_interventional_shapley_entire_image_vs_clinical_category
+    - exact_two_player_interventional_shapley_image_marker_vs_clinical_cue
+  primary_target_for_all_attributions: fixed_heldout_true_class
+  secondary_target: heldout_model_predicted_class_sensitivity
+  attention_rollout_claim_scope: not_target_specific_not_fusion_faithfulness
+  shapley_efficiency_tolerance: 0.00001
+
+shapley:
+  games:
+    modality:
+      players: [entire_image, clinical_category]
+      absent_input: same_train_donor_patient
+    cue:
+      players: [image_marker, clinical_cue]
+      absent_input: same_train_donor_cue_value
+  output: fixed_class_fused_probability
+  coalitions_per_game: 4
+  background_patients: 200
+  background_partition: synthetic_training_only_class_stratified
+  donor_pairing: same_donor_patient_for_both_cues
+  cue_game_image_intervention: transplant_donor_glyph_into_test_marker_location
+  cue_game_clinical_intervention: donor_categorical_value
+  efficiency_tolerance: 0.00001
+  claim_scope: report_modality_game_and_cue_game_separately
+
+evaluation:
+  localization:
+    regions: [exterior_marker, lesion, remaining_background]
+    metrics:
+      - normalized_attribution_mass_share
+      - area_normalized_enrichment
+      - pointing_game_hit
+    mask_to_map_projection: fractional_pixel_intersection
+    controls:
+      - random_maps
+      - area_matched_random_regions
+      - center_gaussian
+    random_map_replicates_per_patient: 20
+    area_matched_region_replicates_per_patient: 20
+  faithfulness:
+    methods: [deletion, insertion]
+    patch_fraction_step: 0.05
+    random_orders: 20
+    random_order_seed_start: 20261119
+    primary_baseline: same_patient_background_only_canvas
+    sensitivity_baseline: gaussian_blur
+    baseline_out_of_training_support_caveat: true
+    targets:
+      image_only_maps: image_only_model_score
+      joint_maps: joint_fusion_score
+  stability:
+    transforms:
+      horizontal_flip:
+        map_and_mask_inverse_transform: true
+      brightness_factors: [0.9, 1.1]
+    metrics: [spearman, ssim]
+    report_unchanged_prediction_subset_and_denominators: true
+  cue_reliance:
+    interpretation: intervention_sensitivity_only
+    metrics:
+      - full_accuracy
+      - masked_accuracy
+      - paired_accuracy_risk_difference
+      - masked_fixed_target_probability_difference
+      - masked_nll_difference
+    gate_interpretation_caveat: balanced_symmetric_cues_may_yield_zero_accuracy_drop_even_when_both_are_learned
+    probability_and_nll_diagnostics_do_not_override_primary_nll_criterion: true
+  uncertainty:
+    unit: patient
+    bootstrap_resamples: 2000
+    confidence_level: 0.95
+    paired_signflip_draws: 10000
+    primary_nll_bootstrap:
+      replicates: 10000
+      stratify_test_resampling_by_true_class: true
+      test_patients_per_class_per_replicate: 300
+      resample_calibration_patients_within_class: true
+      calibration_patients_per_class_per_replicate: 150
+      same_resampled_ids_across_models_and_contrasts: true
+      refit_temperature_per_model_each_replicate: true
+      refit_model_weights: false
+      p_value: centered_paired_bootstrap_one_sided
+      p_value_formula: "(1 + count(bootstrap_error >= estimate_minus_null)) / (replicates + 1)"
+      p_value_add_one_correction: true
+      lower_bound: invert_holm_adjusted_tests
+      holm_alpha: 0.05
+      threshold_nats_per_patient: 0.10
+      bootstrap_seed: 20261123
+  multiplicity:
+    correction: Holm
+    families:
+      - primary_incremental_nll_two_contrasts
+      - two_primary_cue_mask_tests
+      - image_only_marker_localization_4_contrasts
+      - image_only_lesion_localization_4_contrasts
+      - joint_marker_localization_4_contrasts
+      - joint_lesion_localization_4_contrasts
+      - image_only_deletion_6_contrasts
+      - image_only_insertion_6_contrasts
+      - joint_fusion_deletion_6_contrasts
+      - joint_fusion_insertion_6_contrasts
+    faithfulness_baselines: [random_order_mean, center_gaussian]
+    stability_tests: none_descriptive_intervals_only
+    class_stratified_results: descriptive_with_intervals
+
+reporting:
+  synthetic_results_separate_from_real_data: true
+  no_test_based_model_or_explainer_selection: true
+  no_method_winner_claim_from_single_metric: true
+  state_v2_accuracy_floor_and_nll_gate: true
+  report_original_mask_accuracy_drops_as_diagnostics: true
+  report_cue_masking_nll_separately_as_intervention_sensitivity: true
+  document_departure_from_original_three_part_accuracy_gate: true
+  state_calibration_method_and_partition: true
+  state_all_denominators: true
+  state_test_image_debugging_deviation_for_real_phase_f: true
+  explicitly_state_synthetic_to_clinical_validity_limit: true
+
+reproducibility:
+  save_full_config_and_source_hashes: true
+  save_environment_and_hardware_versions: true
+  save_execution_log_and_output_hashes: true
+  hash_protected_real_inputs_before_and_after: true
+  protected_inputs:
+    - frozen_v1_models_and_predictions
+    - original_patient_level_split_and_test_inputs
+    - all_existing_phase_f_outputs_and_configurations
+  output_directory: outputs/synthetic_phase_g_v1/pilot_balanced_085_085_v1
+  overwrite_existing_output: false
