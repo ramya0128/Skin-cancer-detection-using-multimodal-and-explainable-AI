@@ -1,0 +1,78 @@
+Skin Research Lab dashboard smoke test
+Run date: 2026-11-21
+
+Runtime
+- Python: D:\vit_gpu_env\Scripts\python.exe
+- Streamlit 1.67.0
+- NumPy 2.4.6
+- pandas 3.1.1
+- Matplotlib 3.11.2
+- PyTorch 2.7.1+cu128 (cached image tensor loaded on CPU)
+- Local endpoint: http://127.0.0.1:8501
+- Health check: GET /_stcore/health -> HTTP 200, "ok"
+
+Automated checks
+- python -m unittest discover -s research_demo\tests -v -> 4 tests passed
+- python -m py_compile research_demo\app.py research_demo\data_utils.py research_demo\tests\test_dashboard_data.py research_demo\tests\test_dashboard_app.py -> passed
+- AppTest regression: MEL frozen-test support stays at 7 on both OOF and Frozen test views -> passed
+- Missing NPZ path -> explicit FileNotFoundError; no silent fallback
+
+Browser checks
+- Overview -> loaded; displays 1,837 saved OOF rows, 461 frozen-test rows, six classes, and two saved branch checkpoints.
+- Real-data results -> OOF and Frozen test selections loaded; class selector and confusion plot rendered; MEL frozen-test support is 7.
+- Explainability gallery -> CWF probability-level and input-level artifacts loaded; clinical XGBoost grouped TreeSHAP loaded; ViT Grad-CAM, attention rollout, Chefer-style rollout, and occlusion maps rendered.
+- ViT interaction -> changed row 1 to row 2 and switched between CWF-selected and ViT-top targets; matched cached photograph and map remained paired by frozen row keys.
+- Synthetic benchmark -> historical v1 metrics and caveat rendered separately from v2.2 authorization status (draft_unapproved, execution disabled, zero authorized conditions, test access forbidden).
+- Limitations -> loaded, including exploratory test-set reuse, seven MEL cases, split caveats, explanation scope, and non-clinical-use warning.
+
+Verified saved values
+- Frozen-test CWF: accuracy 0.7462, macro-F1 0.7069, NLL 0.7491 (461 rows).
+- Historical synthetic v1: image-only accuracy/NLL 0.841/0.703; clinical-only 0.867/0.608; joint 0.860/0.395.
+- Artifact inventory: 13 of 13 expected dashboard artifacts present.
+
+Screenshots
+- screenshots\01_overview.png
+- screenshots\02_real_data.png
+- screenshots\03a_explainability_cwf.png
+- screenshots\03b_explainability_treeshap.png
+- screenshots\03c_explainability_vit.png
+- screenshots\04_synthetic_benchmark.png
+- screenshots\05_limitations.png
+
+Scope and safety
+- No model training, held-out inference, synthetic cohort generation, or Phase G v2.2 experiment was run.
+- No research output, model checkpoint, frozen split, image cache, or authorization config was modified.
+- The first live run exposed Streamlit's use_container_width deprecation notice; calls were changed to width="stretch". A fresh server start produced no such warning.
+
+Upload-case update
+Run date: 2026-11-21
+
+Launch and health
+- Launch command: `D:\vit_gpu_env\Scripts\python.exe -m streamlit run D:\skin_project\research_demo\app.py --server.address 127.0.0.1 --server.port 8502 --browser.gatherUsageStats false`
+- Port 8501 was already occupied; this dashboard was started on 8502 without stopping or changing the existing process.
+- Health check: GET `http://127.0.0.1:8502/_stcore/health` -> HTTP 200, "ok".
+- Metadata source: `common.META`; override supported with `SKIN_RESEARCH_METADATA`.
+
+Automated checks
+- `D:\vit_gpu_env\Scripts\python.exe -m unittest discover -s research_demo\tests -v` -> 20 tests passed.
+- `D:\vit_gpu_env\Scripts\python.exe -m unittest discover -s experiments\phase_f\tests -p test_shapley.py -v` -> 3 grouped-Shapley tests passed.
+- `D:\vit_gpu_env\Scripts\python.exe -m py_compile research_demo\app.py research_demo\inference.py research_demo\data_utils.py` -> passed.
+- Upload AppTest: expected form controls rendered, no result before submission, and missing-image submit was rejected without a prediction.
+- Existing frozen-test MEL support regression remained green. Streamlit AppTest emitted its existing bare-mode ScriptRunContext warning.
+
+Actual saved-model upload smoke test
+- Input: generated non-dataset RGB image and synthetic/unknown clinical values; image remained temporary and was deleted after the browser check.
+- Runtime: PyTorch 2.7.1+cu128 on `cuda:0`; saved XGBoost 3.2.0 model and saved CWF weights; class order ACK, BCC, MEL, NEV, SCC, SEK.
+- XGBoost, ViT, and CWF outputs each contained six finite normalized probabilities.
+- A new Grad-CAM map was computed for the CWF argmax; shape `(14, 14)`, all finite.
+- Eight grouped probability-Shapley values were computed for the XGBoost branch's predicted class. Efficiency absolute residual on this smoke case: `1.3763e-08`.
+- Browser showed per-branch argmax and probabilities, ViT Grad-CAM, the eight clinical values/contributions, CWF weighted-term breakdown, and a separate cohort-metrics caveat.
+- The smoke input is not a research result; no cohort metric was computed or reported for it.
+
+Screenshot
+- `screenshots\06_upload_case.png` — blank upload form with no selected image or prediction.
+
+Scope and safety
+- No model training, frozen-test image inference, held-out evaluation, synthetic cohort generation, or Phase G v2.2 experiment was run.
+- No outputs, model checkpoints, dataset files, caches, split artifacts, or authorization configuration were changed.
+- Uploaded bytes and clinical values are held only in the Streamlit session; the app does not write them to disk.
