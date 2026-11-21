@@ -93,6 +93,28 @@ class ClinicalPrediction:
     grouped_shapley_values: np.ndarray
 
 
+@dataclass(frozen=True)
+class CaseRuntime:
+    clinical: ClinicalRuntime
+    vit_model: torch.nn.Module
+    device: torch.device
+    xgb_weights: np.ndarray
+
+
+@dataclass(frozen=True)
+class CasePrediction:
+    clinical: ClinicalPrediction
+    vit_probabilities: np.ndarray
+    vit_predicted_class_index: int
+    cwf_probabilities: np.ndarray
+    cwf_predicted_class_index: int
+    gradcam_map: np.ndarray
+    xgb_weight: float
+    xgb_weighted_term: float
+    vit_weighted_term: float
+    cwf_normalization_constant: float
+
+
 def prepare_uploaded_image(image_bytes: bytes) -> torch.Tensor:
     if not isinstance(image_bytes, bytes):
         raise TypeError("image_bytes must be bytes")
@@ -374,4 +396,146 @@ def predict_clinical(
         probabilities=direct_probabilities,
         predicted_class_index=target_class,
         grouped_shapley_values=contributions[:, target_class],
+    )
+
+
+def _load_vit_model(
+    checkpoint_path: Path,
+    n_classes: int,
+    device: torch.device,
+) -> torch.nn.Module:
+    from experiments.phase_f.image_eval import _load_model
+
+    return _load_model(checkpoint_path, n_classes, device)
+
+
+def load_case_runtime(
+    project_root: Path,
+    metadata_path: Path,
+    device: torch.device | str | None = None,
+) -> CaseRuntime:
+    project_root = Path(project_root)
+    outputs = project_root / "outputs"
+    checkpoint_path = outputs / "vit_final_v1.pt"
+    fusion_path = outputs / "fusion_v1.json"
+    for path in (checkpoint_path, fusion_path):
+        if not path.is_file():
+            raise FileNotFoundError(f"required image runtime artifact is missing: {path}")
+
+    with fusion_path.open("r", encoding="utf-8") as file:
+        fusion = json.load(file)
+    if not isinstance(fusion, dict) or fusion.get("selected") != "CWF":
+        raise ValueError("saved fusion artifact must select CWF")
+    saved_classes = fusion.get("classes")
+    if not isinstance(saved_classes, list) or any(
+        not isinstance(class_name, str) for class_name in saved_classes
+    ):
+        raise ValueError("saved fusion artifact must contain the ordered class names")
+    try:
+        xgb_weights = np.asarray(fusion["w_xgb"], dtype=np.float64)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("saved CWF artifact must contain six numeric XGBoost weights") from error
+    if (
+        xgb_weights.shape != (6,)
+        or not np.isfinite(xgb_weights).all()
+        or np.any((xgb_weights < 0) | (xgb_weights > 1))
+    ):
+        raise ValueError("saved CWF artifact must contain six finite weights in [0, 1]")
+
+    clinical_runtime = load_clinical_runtime(project_root, Path(metadata_path))
+    if tuple(saved_classes) != clinical_runtime.class_names:
+        raise ValueError("saved fusion classes do not match the frozen model class order")
+
+    resolved_device = (
+        torch.device(device)
+        if device is not None
+        else torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    )
+    if resolved_device.type == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA was requested for ViT inference but is unavailable")
+    vit_model = _load_vit_model(
+        checkpoint_path,
+        n_classes=len(clinical_runtime.class_names),
+        device=resolved_device,
+    )
+    return CaseRuntime(
+        clinical=clinical_runtime,
+        vit_model=vit_model,
+        device=resolved_device,
+        xgb_weights=xgb_weights,
+    )
+
+
+def predict_uploaded_case(
+    image: torch.Tensor,
+    inputs: ClinicalInputs,
+    runtime: CaseRuntime,
+) -> CasePrediction:
+    from experiments.phase_f.image_eval import (
+        _gradcam_maps,
+        _normalized_model_inputs,
+    )
+
+    if not isinstance(image, torch.Tensor):
+        raise TypeError("image must be a prepared torch tensor")
+    if image.shape != (1, 3, 224, 224):
+        raise ValueError("image must contain one RGB 224x224 case")
+
+    clinical_prediction = predict_clinical(inputs, runtime.clinical)
+    normalized_image = _normalized_model_inputs(image, runtime.device)
+    runtime.vit_model.eval()
+    with torch.inference_mode():
+        logits = runtime.vit_model(normalized_image)
+    if (
+        not isinstance(logits, torch.Tensor)
+        or logits.shape != (1, len(runtime.clinical.class_names))
+        or not torch.isfinite(logits).all()
+    ):
+        raise ValueError("ViT model must return one finite logit per saved class")
+    vit_probabilities = _validate_probability_matrix(
+        torch.softmax(logits, dim=1).cpu().numpy(),
+        expected_rows=1,
+    )[0]
+    cwf_probabilities = fuse_cwf(
+        clinical_prediction.probabilities,
+        vit_probabilities,
+        runtime.xgb_weights,
+    )
+    cwf_normalization_constant = float(
+        (
+            runtime.xgb_weights * clinical_prediction.probabilities
+            + (1.0 - runtime.xgb_weights) * vit_probabilities
+        ).sum()
+    )
+    cwf_class_index = int(np.argmax(cwf_probabilities))
+    gradcam = np.asarray(
+        _gradcam_maps(
+            runtime.vit_model,
+            normalized_image,
+            np.asarray([cwf_class_index], dtype=np.int64),
+        ),
+        dtype=np.float32,
+    )
+    if (
+        gradcam.shape != (1, 14, 14)
+        or not np.isfinite(gradcam).all()
+        or np.any((gradcam < 0) | (gradcam > 1))
+    ):
+        raise ValueError("ViT Grad-CAM must return one finite normalized 14x14 map")
+    xgb_weight = float(runtime.xgb_weights[cwf_class_index])
+    return CasePrediction(
+        clinical=clinical_prediction,
+        vit_probabilities=vit_probabilities,
+        vit_predicted_class_index=int(np.argmax(vit_probabilities)),
+        cwf_probabilities=cwf_probabilities,
+        cwf_predicted_class_index=cwf_class_index,
+        gradcam_map=gradcam[0],
+        xgb_weight=xgb_weight,
+        xgb_weighted_term=float(
+            xgb_weight * clinical_prediction.probabilities[cwf_class_index]
+        ),
+        vit_weighted_term=float(
+            (1.0 - xgb_weight) * vit_probabilities[cwf_class_index]
+        ),
+        cwf_normalization_constant=cwf_normalization_constant,
     )

@@ -1,23 +1,31 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
 from PIL import Image
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 from research_demo.inference import (
+    CasePrediction,
+    CaseRuntime,
     ClinicalInputs,
     encode_clinical_inputs,
     fuse_cwf,
+    load_case_runtime,
     load_clinical_runtime,
     prepare_uploaded_image,
     predict_clinical,
+    predict_uploaded_case,
 )
 
 
@@ -62,6 +70,16 @@ def saved_columns() -> list[str]:
 
 CLASSES = ("ACK", "BCC", "MEL", "NEV", "SCC", "SEK")
 BACKGROUND_COUNTS = (34, 34, 33, 33, 33, 33)
+FUSION_WEIGHTS = np.asarray(
+    [
+        0.5147864184008762,
+        0.5261437908496732,
+        0.4146341463414634,
+        0.49825783972125426,
+        0.4520547945205479,
+        0.3730569948186528,
+    ]
+)
 
 
 class ToyClassifier:
@@ -85,6 +103,60 @@ class ToyClassifier:
         return exponentials / exponentials.sum(axis=1, keepdims=True)
 
 
+class FakeViTLayer(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.projection = nn.Linear(1, 1)
+        self.ln_1 = nn.Identity()
+        with torch.no_grad():
+            self.projection.weight.fill_(1.0)
+            self.projection.bias.zero_()
+
+
+class FakeViT(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.encoder = nn.Module()
+        self.encoder.layers = nn.ModuleList([FakeViTLayer()])
+        self.heads = nn.Module()
+        self.heads.head = nn.Linear(1, 6)
+        with torch.no_grad():
+            self.heads.head.weight.copy_(
+                torch.arange(1, 7, dtype=torch.float32).reshape(6, 1) / 1000.0
+            )
+            self.heads.head.bias.copy_(
+                torch.log(torch.tensor([0.13, 0.15, 0.16, 0.17, 0.18, 0.21]))
+            )
+
+    def forward(self, image: torch.Tensor) -> torch.Tensor:
+        patches = F.adaptive_avg_pool2d(
+            image.mean(dim=1, keepdim=True),
+            output_size=(14, 14),
+        ).flatten(2).transpose(1, 2)
+        cls_token = patches.mean(dim=1, keepdim=True)
+        tokens = torch.cat((cls_token, patches), dim=1)
+        tokens = self.encoder.layers[-1].projection(tokens)
+        tokens = self.encoder.layers[-1].ln_1(tokens)
+        return self.heads.head(tokens[:, 0, :])
+
+
+class InvalidLogitViT(FakeViT):
+    def forward(self, image: torch.Tensor) -> torch.Tensor:
+        return torch.full(
+            (image.shape[0], 6),
+            float("nan"),
+            dtype=image.dtype,
+            device=image.device,
+        )
+
+
+class InvalidProbabilityClassifier(ToyClassifier):
+    def predict_proba(self, frame: pd.DataFrame) -> np.ndarray:
+        probabilities = super().predict_proba(frame)
+        probabilities[:, 0] += 1e-4
+        return probabilities
+
+
 def clinical_inputs() -> ClinicalInputs:
     return ClinicalInputs(
         grew="True",
@@ -102,6 +174,7 @@ def create_clinical_project(
     root: Path,
     columns: list[str] | None = None,
     background_indices: np.ndarray | None = None,
+    fusion_weights: np.ndarray | None = None,
 ) -> Path:
     from joblib import dump
 
@@ -156,6 +229,17 @@ def create_clinical_project(
         else np.asarray(background_indices)
     )
     np.savez(output_dir / "treeshap_v1.npz", test_background_indices=indices)
+    weights = FUSION_WEIGHTS if fusion_weights is None else fusion_weights
+    (output_dir / "fusion_v1.json").write_text(
+        json.dumps(
+            {
+                "selected": "CWF",
+                "classes": CLASSES,
+                "w_xgb": np.asarray(weights).tolist(),
+            }
+        ),
+        encoding="utf-8",
+    )
     saved = saved_columns() if columns is None else columns
     dump(
         {"model": ToyClassifier(), "columns": saved},
@@ -360,6 +444,150 @@ class ClinicalRuntimeTests(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 load_clinical_runtime(root, metadata_path)
+
+
+class CaseRuntimeTests(unittest.TestCase):
+    def _load_fake_runtime(self, root: Path, metadata_path: Path):
+        checkpoint = root / "outputs" / "vit_final_v1.pt"
+        torch.save(FakeViT().state_dict(), checkpoint)
+        with patch(
+            "experiments.phase_f.image_eval.models.vit_b_16",
+            side_effect=lambda weights=None: FakeViT(),
+        ):
+            return load_case_runtime(
+                root,
+                metadata_path,
+                device=torch.device("cpu"),
+            )
+
+    def test_loads_strict_vit_checkpoint_and_saved_fusion_weights(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            metadata_path = create_clinical_project(root)
+
+            runtime = self._load_fake_runtime(root, metadata_path)
+
+        self.assertEqual(runtime.clinical.class_names, CLASSES)
+        np.testing.assert_array_equal(runtime.xgb_weights, FUSION_WEIGHTS)
+        self.assertEqual(runtime.device, torch.device("cpu"))
+
+    def test_predicts_each_branch_and_targets_gradcam_at_cwf_class(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            metadata_path = create_clinical_project(root)
+            runtime = self._load_fake_runtime(root, metadata_path)
+            from experiments.phase_f import image_eval
+
+            original_gradcam = image_eval._gradcam_maps
+            observed_targets = []
+            observed_inputs = []
+
+            def capture_gradcam(model, normalized, target_classes):
+                observed_targets.extend(np.asarray(target_classes).tolist())
+                observed_inputs.append(normalized.detach().cpu().clone())
+                return original_gradcam(model, normalized, target_classes)
+
+            image = torch.linspace(0.0, 1.0, 224 * 224).reshape(1, 1, 224, 224)
+            image = image.repeat(1, 3, 1, 1)
+            with patch.object(
+                image_eval,
+                "_gradcam_maps",
+                side_effect=capture_gradcam,
+            ):
+                first = predict_uploaded_case(image, clinical_inputs(), runtime)
+                second = predict_uploaded_case(torch.flip(image, dims=[-1]), clinical_inputs(), runtime)
+
+        self.assertEqual(first.vit_probabilities.shape, (6,))
+        self.assertEqual(first.cwf_probabilities.shape, (6,))
+        self.assertTrue(np.isfinite(first.vit_probabilities).all())
+        self.assertTrue(np.isfinite(first.cwf_probabilities).all())
+        self.assertAlmostEqual(float(first.cwf_probabilities.sum()), 1.0, places=6)
+        self.assertEqual(
+            first.cwf_predicted_class_index,
+            int(first.cwf_probabilities.argmax()),
+        )
+        self.assertNotEqual(
+            first.vit_predicted_class_index,
+            first.cwf_predicted_class_index,
+        )
+        self.assertEqual(first.gradcam_map.shape, (14, 14))
+        self.assertTrue(np.isfinite(first.gradcam_map).all())
+        self.assertEqual(
+            observed_targets,
+            [
+                first.cwf_predicted_class_index,
+                second.cwf_predicted_class_index,
+            ],
+        )
+        self.assertEqual(len(observed_inputs), 2)
+        self.assertFalse(torch.equal(observed_inputs[0], observed_inputs[1]))
+        target = first.cwf_predicted_class_index
+        expected_xgb_term = FUSION_WEIGHTS[target] * first.clinical.probabilities[target]
+        expected_vit_term = (1.0 - FUSION_WEIGHTS[target]) * first.vit_probabilities[target]
+        self.assertAlmostEqual(first.xgb_weighted_term, expected_xgb_term, places=7)
+        self.assertAlmostEqual(first.vit_weighted_term, expected_vit_term, places=7)
+        self.assertAlmostEqual(
+            first.cwf_probabilities[target],
+            (expected_xgb_term + expected_vit_term)
+            / first.cwf_normalization_constant,
+            places=7,
+        )
+
+    def test_rejects_malformed_checkpoint_and_cwf_weights(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            metadata_path = create_clinical_project(
+                root,
+                fusion_weights=np.asarray([0.5, 0.5]),
+            )
+            torch.save(FakeViT().state_dict(), root / "outputs" / "vit_final_v1.pt")
+            with self.assertRaises(ValueError):
+                load_case_runtime(root, metadata_path, device=torch.device("cpu"))
+
+            metadata_path = create_clinical_project(
+                root,
+                fusion_weights=FUSION_WEIGHTS,
+            )
+            torch.save(
+                {"wrong": torch.tensor(1)},
+                root / "outputs" / "vit_final_v1.pt",
+            )
+            with patch(
+                "experiments.phase_f.image_eval.models.vit_b_16",
+                side_effect=lambda weights=None: FakeViT(),
+            ):
+                with self.assertRaises(RuntimeError):
+                    load_case_runtime(
+                        root,
+                        metadata_path,
+                        device=torch.device("cpu"),
+                    )
+
+    def test_rejects_invalid_clinical_branch_probabilities(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            metadata_path = create_clinical_project(root)
+            runtime = self._load_fake_runtime(root, metadata_path)
+            invalid_clinical_runtime = replace(
+                runtime.clinical,
+                model=InvalidProbabilityClassifier(),
+            )
+            invalid_runtime = replace(runtime, clinical=invalid_clinical_runtime)
+
+            with self.assertRaises(ValueError):
+                predict_uploaded_case(
+                    torch.zeros((1, 3, 224, 224)),
+                    clinical_inputs(),
+                    invalid_runtime,
+                )
+
+            invalid_vit_runtime = replace(runtime, vit_model=InvalidLogitViT())
+            with self.assertRaises(ValueError):
+                predict_uploaded_case(
+                    torch.zeros((1, 3, 224, 224)),
+                    clinical_inputs(),
+                    invalid_vit_runtime,
+                )
 
 
 if __name__ == "__main__":
