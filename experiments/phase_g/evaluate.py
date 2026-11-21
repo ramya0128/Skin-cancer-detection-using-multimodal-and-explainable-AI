@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any
 
 import numpy as np
@@ -374,22 +375,21 @@ def _random_lesion_translation(
     occupied: np.ndarray,
     rng: np.random.Generator,
 ) -> np.ndarray:
-    ys, xs = np.nonzero(lesion)
-    if len(ys) == 0:
+    if lesion.shape != occupied.shape:
+        raise ValueError("lesion and occupied masks must have matching shapes")
+    desired_area = int(np.count_nonzero(lesion))
+    if desired_area == 0:
         raise ValueError("lesion masks cannot be empty")
-    top_min, top_max = int(ys.min()), int(ys.max())
-    left_min, left_max = int(xs.min()), int(xs.max())
-    relative_y, relative_x = ys - top_min, xs - left_min
-    height, width = top_max - top_min + 1, left_max - left_min + 1
-    for _ in range(10000):
-        top = int(rng.integers(0, lesion.shape[0] - height + 1))
-        left = int(rng.integers(0, lesion.shape[1] - width + 1))
-        if np.any(occupied[top + relative_y, left + relative_x]):
-            continue
-        translated = np.zeros_like(lesion, dtype=bool)
-        translated[top + relative_y, left + relative_x] = True
-        return translated
-    raise RuntimeError("could not sample an area-matched lesion translation")
+    available = np.flatnonzero(~occupied.reshape(-1))
+    if available.size < desired_area:
+        raise RuntimeError(
+            "could not sample an area-matched lesion control: "
+            f"available pixels={available.size}, desired={desired_area}"
+        )
+    chosen = rng.choice(available, size=desired_area, replace=False)
+    translated = np.zeros_like(lesion, dtype=bool)
+    translated.reshape(-1)[chosen] = True
+    return translated
 
 
 def _center_gaussian(size: int = 14, sigma: float = 3.5) -> np.ndarray:
@@ -559,7 +559,12 @@ def _predict_target_scores(
 ) -> np.ndarray:
     device = _device(model)
     scores = []
-    with torch.no_grad():
+    inference_context = (
+        torch.amp.autocast(device_type="cuda", dtype=torch.float16)
+        if device.type == "cuda"
+        else nullcontext()
+    )
+    with torch.no_grad(), inference_context:
         for start in range(0, len(images), batch_size):
             end = min(start + batch_size, len(images))
             batch = _image_tensor(images[start:end], device)
@@ -600,6 +605,51 @@ def _ranked_variants(
         deletion.append(deleted)
         insertion.append(inserted)
     return deletion, insertion
+
+
+def _ranked_variants_batched(
+    originals: torch.Tensor,
+    baselines: torch.Tensor,
+    orders: np.ndarray | torch.Tensor,
+    patch_counts: np.ndarray,
+    device: torch.device,
+) -> torch.Tensor:
+    if originals.ndim != 4 or originals.shape != baselines.shape:
+        raise ValueError("originals and baselines must align as (N, 3, 224, 224)")
+    count = len(originals)
+    if tuple(originals.shape[1:]) != (3, 224, 224):
+        raise ValueError("originals and baselines must be 224x224 RGB images")
+    order_tensor = torch.as_tensor(orders, dtype=torch.long, device=device)
+    if order_tensor.ndim == 1:
+        order_tensor = order_tensor.unsqueeze(0).expand(count, -1)
+    if order_tensor.shape != (count, 196):
+        raise ValueError("orders must contain one 196-patch permutation per image")
+    if torch.any(torch.sort(order_tensor, dim=1).values != torch.arange(196, device=device)):
+        raise ValueError("each order must be a permutation of the 196 image patches")
+
+    original_tensor = originals.to(device=device, dtype=torch.float32)
+    baseline_tensor = baselines.to(device=device, dtype=torch.float32)
+    counts = torch.as_tensor(patch_counts, dtype=torch.long, device=device)
+    if counts.ndim != 1 or torch.any((counts < 0) | (counts > 196)):
+        raise ValueError("patch_counts must be a vector of values in [0, 196]")
+    patch_rank = torch.empty_like(order_tensor)
+    patch_rank.scatter_(
+        1,
+        order_tensor,
+        torch.arange(196, device=device).expand(count, -1),
+    )
+    selected = patch_rank[:, None, :] < counts[None, :, None]
+    pixel_mask = (
+        selected.reshape(count, len(counts), 14, 14)
+        .repeat_interleave(16, dim=-2)
+        .repeat_interleave(16, dim=-1)
+        .unsqueeze(2)
+    )
+    originals_expanded = original_tensor[:, None]
+    baselines_expanded = baseline_tensor[:, None]
+    deletion = torch.where(pixel_mask, baselines_expanded, originals_expanded)
+    insertion = torch.where(pixel_mask, originals_expanded, baselines_expanded)
+    return torch.stack((deletion, insertion), dim=1)
 
 
 def _curves_for_order(
@@ -678,39 +728,112 @@ def deletion_insertion_metrics(
     center_curves = np.empty((n, 2, 2, len(patch_counts)), dtype=np.float32)
     center_map = _center_gaussian()
     random_seeds = np.random.SeedSequence(seed).generate_state(random_count)
-    for row in range(n):
-        original = _image_tensor(images[row:row + 1], torch.device("cpu"))[0]
-        background = _image_tensor(background_canvases[row:row + 1], torch.device("cpu"))[0]
-        blurred = _gaussian_blur_batch(original.unsqueeze(0), blur_radius)[0]
-        baselines = (background, blurred)
-        category = None if category_tensor is None else category_tensor[row:row + 1]
-        target = int(targets[row])
-        orders = [
-            np.argsort(-value[row].reshape(-1), kind="stable")
-            for value in normalized_maps.values()
+    device = _device(model)
+    patient_chunk_size = 8
+    inference_batch_size = max(batch_size, 128) if device.type == "cuda" else batch_size
+    random_orders = [
+        np.random.default_rng(int(order_seed)).permutation(196).astype(np.int64)
+        for order_seed in random_seeds
+    ]
+    center_order = np.argsort(-center_map.reshape(-1), kind="stable")
+
+    for chunk_start in range(0, n, patient_chunk_size):
+        chunk_stop = min(chunk_start + patient_chunk_size, n)
+        chunk_rows = np.arange(chunk_start, chunk_stop)
+        originals = [
+            _image_tensor(images[row:row + 1], torch.device("cpu"))[0]
+            for row in chunk_rows
         ]
-        random_orders = [
-            np.random.default_rng(int(order_seed)).permutation(196).astype(np.int64)
-            for order_seed in random_seeds
+        backgrounds = [
+            _image_tensor(background_canvases[row:row + 1], torch.device("cpu"))[0]
+            for row in chunk_rows
         ]
-        center_order = np.argsort(-center_map.reshape(-1), kind="stable")
-        for method_index, order in enumerate(orders):
-            for baseline_index, baseline in enumerate(baselines):
-                curves[row, method_index, baseline_index] = _curves_for_order(
-                    model, model_kind, original, baseline, category, target,
-                    order, patch_counts, batch_size, temperature,
-                )
-        for random_index, order in enumerate(random_orders):
-            for baseline_index, baseline in enumerate(baselines):
-                random_curves[row, random_index, baseline_index] = _curves_for_order(
-                    model, model_kind, original, baseline, category, target,
-                    order, patch_counts, batch_size, temperature,
-                )
-        for baseline_index, baseline in enumerate(baselines):
-            center_curves[row, baseline_index] = _curves_for_order(
-                model, model_kind, original, baseline, category, target,
-                center_order, patch_counts, batch_size, temperature,
+        blurred = [
+            _gaussian_blur_batch(original.unsqueeze(0), blur_radius)[0]
+            for original in originals
+        ]
+
+        def batched_patient_curves(
+            method_order: np.ndarray | list[np.ndarray],
+            baseline_images: list[torch.Tensor],
+            target_chunk: np.ndarray,
+        ) -> np.ndarray:
+            order_array = (
+                np.stack(method_order)
+                if isinstance(method_order, list)
+                else method_order
             )
+            variants = _ranked_variants_batched(
+                torch.stack(originals),
+                torch.stack(baseline_images),
+                order_array,
+                patch_counts,
+                device,
+            )
+            patient_count = len(chunk_rows)
+            variants = variants.reshape(
+                patient_count * 2 * len(patch_counts), 3, 224, 224
+            )
+            categories = (
+                category_tensor[chunk_rows]
+                .to(device)
+                .repeat_interleave(2 * len(patch_counts))
+                if category_tensor is not None
+                else None
+            )
+            target_tensor = torch.as_tensor(
+                target_chunk, dtype=torch.long, device=device
+            ).repeat_interleave(2 * len(patch_counts))
+            scores = _predict_target_scores(
+                model,
+                model_kind,
+                variants,
+                categories,
+                target_tensor,
+                inference_batch_size,
+                temperature,
+            )
+            return scores.reshape(patient_count, 2, len(patch_counts)).astype(
+                np.float32
+            )
+
+        for method_index, (name, value) in enumerate(normalized_maps.items()):
+            method_orders = [
+                np.argsort(-value[row].reshape(-1), kind="stable")
+                for row in chunk_rows
+            ]
+            for baseline_index, baseline_images in enumerate(
+                (backgrounds, blurred)
+            ):
+                chunk_curves = batched_patient_curves(
+                    method_orders,
+                    baseline_images,
+                    targets[chunk_start:chunk_stop],
+                )
+                curves[chunk_start:chunk_stop, method_index, baseline_index] = (
+                    chunk_curves
+                )
+
+        for random_index, order in enumerate(random_orders):
+            for baseline_index, baseline_images in enumerate(
+                (backgrounds, blurred)
+            ):
+                chunk_curves = batched_patient_curves(
+                    order,
+                    baseline_images,
+                    targets[chunk_start:chunk_stop],
+                )
+                random_curves[
+                    chunk_start:chunk_stop, random_index, baseline_index
+                ] = chunk_curves
+
+        for baseline_index, baseline_images in enumerate((backgrounds, blurred)):
+            chunk_curves = batched_patient_curves(
+                center_order,
+                baseline_images,
+                targets[chunk_start:chunk_stop],
+            )
+            center_curves[chunk_start:chunk_stop, baseline_index] = chunk_curves
     auc = np.trapezoid(curves, x=np.linspace(0, 1, len(patch_counts)), axis=-1)
     random_auc = np.trapezoid(
         random_curves, x=np.linspace(0, 1, len(patch_counts)), axis=-1
@@ -734,6 +857,8 @@ def deletion_insertion_metrics(
         "center_gaussian_auc": center_auc.astype(np.float32),
         "random_order_seeds": random_seeds.astype(np.uint32),
         "temperature": np.asarray(temperature, dtype=np.float64),
+        "execution_device": np.asarray(str(device)),
+        "inference_batch_size": np.asarray(inference_batch_size, dtype=np.int64),
         "outcome_type": np.asarray("faithfulness"),
         "attention_rollout_role": np.asarray("class_independent_control"),
     }

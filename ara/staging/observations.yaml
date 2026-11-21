@@ -1,0 +1,15 @@
+observations:
+  - id: O01
+    timestamp: "2026-11-18T21:26:50+05:30"
+    provenance: ai-executed
+    content: "No MILK10k or other candidate second-dataset files were found in the repository during the prior read-only audit."
+    context: "Phase H requires actual candidate files for a license/schema check."
+    potential_type: observation
+    promoted: false
+  - id: O02
+    timestamp: "2026-11-18T21:26:50+05:30"
+    provenance: ai-suggested
+    content: "Recent multimodal explanation and same-dataset fusion work makes broad novelty claims unsafe; narrower distinctions require full-text comparisons."
+    context: "Focused literature/novelty audit documented in LITERATURE_NOVELTY_AUDIT.md."
+    potential_type: claim
+    promoted: true

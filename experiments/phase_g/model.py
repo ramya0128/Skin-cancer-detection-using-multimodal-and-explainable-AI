@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
 import numpy as np
+
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+
 import torch
 from scipy.optimize import minimize_scalar
 from torch import nn
@@ -285,15 +289,22 @@ def train_model(
     if best_state is None:
         raise RuntimeError("training ended without a finite model-selection checkpoint")
     model.load_state_dict(best_state)
-    torch.save(
-        {
-            "kind": kind,
-            "seed": seed,
-            "selected_epoch": best_epoch,
-            "state_dict": best_state,
-        },
-        checkpoint_path,
-    )
+    temporary_checkpoint = checkpoint_path.with_name(checkpoint_path.name + ".tmp")
+    try:
+        torch.save(
+            {
+                "kind": kind,
+                "seed": seed,
+                "selected_epoch": best_epoch,
+                "state_dict": best_state,
+            },
+            temporary_checkpoint,
+        )
+        os.replace(temporary_checkpoint, checkpoint_path)
+    except Exception:
+        if temporary_checkpoint.exists():
+            temporary_checkpoint.unlink()
+        raise
     model.to("cpu")
     return TrainingResult(
         model=model,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Iterator, Sequence
 
 import numpy as np
@@ -239,7 +239,7 @@ def _blur(image: torch.Tensor, radius: float = 6.0) -> torch.Tensor:
     return torch.from_numpy(np.asarray(blurred).copy()).permute(2, 0, 1).float().div_(255.0)
 
 
-def _occlusion(
+def _occlusion_batched(
     model: nn.Module,
     model_kind: str,
     images: torch.Tensor,
@@ -249,47 +249,111 @@ def _occlusion(
     temperature: float,
 ) -> np.ndarray:
     device = images.device
-    probabilities = []
-    raw_images = images.detach().cpu()
-    raw_categories = None if categories is None else categories.detach().cpu()
+    if images.ndim != 4 or tuple(images.shape[1:]) != (3, 224, 224):
+        raise ValueError("occlusion images must have shape (N, 3, 224, 224)")
+    if targets.shape != (len(images),):
+        raise ValueError("occlusion targets must align with images")
+    if model_kind == "joint" and (
+        categories is None or categories.shape != (len(images),)
+    ):
+        raise ValueError("joint occlusion requires aligned clinical categories")
+    if batch_size < 1:
+        raise ValueError("occlusion batch size must be positive")
+
+    def target_scores(
+        batch_images: torch.Tensor,
+        batch_categories: torch.Tensor | None,
+        batch_targets: torch.Tensor,
+    ) -> np.ndarray:
+        context = (
+            torch.amp.autocast(device_type="cuda", dtype=torch.float16)
+            if device.type == "cuda"
+            else nullcontext()
+        )
+        with torch.no_grad(), context:
+            logits = _logits(model, model_kind, batch_images, batch_categories)
+            probabilities = torch.softmax(logits / temperature, dim=1)
+            return (
+                probabilities.gather(1, batch_targets[:, None])
+                .squeeze(1)
+                .float()
+                .cpu()
+                .numpy()
+            )
+
+    patient_chunk_size = 4
+    inference_batch_size = max(batch_size, 128) if device.type == "cuda" else batch_size
+    erase_masks = (
+        torch.eye(PATCH_COUNT, dtype=torch.bool, device=device)
+        .reshape(PATCH_COUNT, PATCH_GRID, PATCH_GRID)
+        .repeat_interleave(PATCH_SIZE, dim=-2)
+        .repeat_interleave(PATCH_SIZE, dim=-1)
+        .unsqueeze(1)
+    )
     maps = np.zeros((len(images), PATCH_GRID, PATCH_GRID), dtype=np.float32)
-    with torch.no_grad():
-        for row in range(len(images)):
-            source = raw_images[row]
-            baseline = _blur(source)
-            variants = []
-            for patch in range(PATCH_COUNT):
-                top, left = divmod(patch, PATCH_GRID)
-                top *= PATCH_SIZE
-                left *= PATCH_SIZE
-                variant = source.clone()
-                variant[:, top:top + PATCH_SIZE, left:left + PATCH_SIZE] = baseline[
-                    :, top:top + PATCH_SIZE, left:left + PATCH_SIZE
-                ]
-                variants.append(variant)
-            category = None if raw_categories is None else raw_categories[row:row + 1]
-            target = int(targets[row])
-            original_score = None
-            drops = []
-            for start in range(0, len(variants), batch_size):
-                batch = _image_tensor(torch.stack(variants[start:start + batch_size]), device)
-                batch_categories = (
-                    None if category is None else category.to(device).expand(len(batch))
-                )
-                logits = _logits(model, model_kind, batch, batch_categories)
-                scores = torch.softmax(logits / temperature, dim=1)[:, target]
-                drops.extend(scores.detach().cpu().tolist())
-            original = _image_tensor(source.unsqueeze(0), device)
-            original_categories = None if category is None else category.to(device)
-            original_score = torch.softmax(
-                _logits(model, model_kind, original, original_categories) / temperature,
-                dim=1,
-            )[0, target]
-            raw = original_score.detach().cpu().item() - np.asarray(drops)
-            values = np.maximum(np.nan_to_num(raw, nan=0.0), 0.0).reshape(14, 14)
-            high = float(values.max())
-            maps[row] = values / high if high > 1e-8 else values
+    for start in range(0, len(images), patient_chunk_size):
+        stop = min(start + patient_chunk_size, len(images))
+        source = _image_tensor(images[start:stop], device)
+        blurred = torch.stack(
+            [_blur(image) for image in source.detach().cpu()]
+        ).to(device)
+        variants = torch.where(
+            erase_masks.unsqueeze(0),
+            blurred[:, None],
+            source[:, None],
+        ).reshape(-1, 3, 224, 224)
+        chunk_targets = targets[start:stop].to(device)
+        target_variants = chunk_targets.repeat_interleave(PATCH_COUNT)
+        category_variants = (
+            categories[start:stop].to(device).repeat_interleave(PATCH_COUNT)
+            if categories is not None
+            else None
+        )
+        variant_scores = []
+        for batch_start in range(0, len(variants), inference_batch_size):
+            batch_stop = min(batch_start + inference_batch_size, len(variants))
+            batch_categories = (
+                None
+                if category_variants is None
+                else category_variants[batch_start:batch_stop]
+            )
+            variant_scores.extend(
+                target_scores(
+                    variants[batch_start:batch_stop],
+                    batch_categories,
+                    target_variants[batch_start:batch_stop],
+                ).tolist()
+            )
+        original_categories = (
+            None if categories is None else categories[start:stop].to(device)
+        )
+        original_scores = target_scores(source, original_categories, chunk_targets)
+        drops = np.maximum(
+            original_scores[:, None] - np.asarray(variant_scores).reshape(-1, PATCH_COUNT),
+            0.0,
+        ).reshape(-1, PATCH_GRID, PATCH_GRID)
+        maximum = drops.max(axis=(1, 2), keepdims=True)
+        maps[start:stop] = np.divide(
+            drops,
+            maximum,
+            out=np.zeros_like(drops),
+            where=maximum > 1e-8,
+        )
     return maps
+
+
+def _occlusion(
+    model: nn.Module,
+    model_kind: str,
+    images: torch.Tensor,
+    categories: torch.Tensor | None,
+    targets: torch.Tensor,
+    batch_size: int,
+    temperature: float,
+) -> np.ndarray:
+    return _occlusion_batched(
+        model, model_kind, images, categories, targets, batch_size, temperature
+    )
 
 
 def compute_image_maps(

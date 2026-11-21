@@ -119,12 +119,12 @@ def generate_cues(
         "synergistic",
     }:
         raise ValueError(f"unknown condition: {condition}")
+    if condition != "conflicting" and conflict_orientation is not None:
+        raise ValueError("conflict orientation is only valid for conflicting condition")
 
     image_rng = rngs["image_cue_noise"]
     clinical_rng = rngs["clinical_cue_noise"]
     if condition == "balanced":
-        if conflict_orientation is not None:
-            raise ValueError("conflict orientation is only valid for conflicting condition")
         return (
             _corrupt_class(label, 0.85, image_rng),
             _corrupt_class(label, 0.85, clinical_rng),
@@ -143,12 +143,14 @@ def generate_cues(
         shared = _corrupt_class(label, 0.85, rngs["shared"])
         return shared, shared
     if condition == "conflicting":
-        if conflict_orientation == "image":
+        if conflict_orientation in {"image", "image_correct"}:
             return label, _draw_other_class(label, clinical_rng)
-        if conflict_orientation == "clinical":
+        if conflict_orientation in {"clinical", "clinical_correct"}:
             return _draw_other_class(label, image_rng), label
-        if conflict_orientation is not None:
-            raise ValueError("conflict orientation must be 'image', 'clinical', or None")
+        if conflict_orientation not in {None, "none"}:
+            raise ValueError(
+                "conflict orientation must be image_correct, clinical_correct, or none"
+            )
         return (
             _corrupt_class(label, 0.85, image_rng),
             _corrupt_class(label, 0.85, clinical_rng),
@@ -285,11 +287,16 @@ def render_patient(
     label: int,
     partition: str,
     config: dict[str, Any],
+    conflict_orientation: str | None = None,
 ) -> SyntheticPatient:
     if partition not in PARTITION_COUNTS_PER_CLASS:
         raise ValueError(f"unknown partition: {partition}")
     if label not in config["labels"]["values"]:
         raise ValueError(f"label is not configured: {label}")
+
+    condition = str(config["pilot_condition"])
+    if condition == "conflicting" and conflict_orientation is None:
+        raise ValueError("conflicting rendering requires an explicit orientation")
 
     master_seed = int(config["master_seed"])
     rngs, stream_seeds = _stream_rngs(master_seed, patient_id)
@@ -304,7 +311,6 @@ def render_patient(
     image = background.copy()
     image[lesion_mask] = lesion_image[lesion_mask]
 
-    condition = str(config["pilot_condition"])
     cue_rngs = {
         "image_cue_noise": rngs["image_cue_noise"],
         "clinical_cue_noise": rngs["clinical_cue_noise"],
@@ -312,7 +318,12 @@ def render_patient(
         "image_share_noise": rngs["image_cue_noise"],
         "clinical_share_noise": rngs["clinical_cue_noise"],
     }
-    image_cue, clinical_value = generate_cues(label, condition, cue_rngs)
+    image_cue, clinical_value = generate_cues(
+        label,
+        condition,
+        cue_rngs,
+        conflict_orientation=conflict_orientation,
+    )
 
     marker_options = config["render"]["exterior_marker"]["allowed_top_left_pixels"]
     marker_y, marker_x = marker_options[
@@ -343,6 +354,8 @@ def render_patient(
         "replacement_image_cues": replacement_image,
         "replacement_clinical_cues": replacement_clinical,
     }
+    if condition == "conflicting":
+        metadata["conflict_orientation"] = conflict_orientation
     return SyntheticPatient(
         patient_id=patient_id,
         label=int(label),
@@ -362,6 +375,7 @@ def generate_split(
     labels: dict[str, int],
     partition: str,
     config: dict[str, Any],
+    conflict_orientations: dict[str, str | None] | None = None,
 ) -> list[SyntheticPatient]:
     if partition not in PARTITION_COUNTS_PER_CLASS:
         raise ValueError(f"unknown partition: {partition}")
@@ -370,7 +384,48 @@ def generate_split(
     missing = [patient_id for patient_id in patient_ids if patient_id not in labels]
     if missing:
         raise KeyError(f"missing labels for patient IDs: {missing[:5]}")
+    is_conflicting = config.get("pilot_condition") == "conflicting"
+    normalized_conflict_orientations: dict[str, str] | None = None
+    if is_conflicting:
+        if conflict_orientations is None or set(conflict_orientations) != set(patient_ids):
+            raise ValueError(
+                "conflicting split requires an orientation for every patient"
+            )
+        allowed_orientations = (
+            None,
+            "none",
+            "image",
+            "clinical",
+            "image_correct",
+            "clinical_correct",
+        )
+        invalid = [
+            orientation
+            for orientation in conflict_orientations.values()
+            if orientation not in allowed_orientations
+        ]
+        if invalid:
+            raise ValueError(f"invalid conflicting orientation: {invalid[0]}")
+        normalized_conflict_orientations = {
+            patient_id: (
+                "none" if orientation is None else orientation
+            )
+            for patient_id, orientation in conflict_orientations.items()
+        }
+    elif conflict_orientations is not None:
+        raise ValueError("conflict orientations are only valid for conflicting condition")
+
     return [
-        render_patient(patient_id, labels[patient_id], partition, config)
+        render_patient(
+            patient_id,
+            labels[patient_id],
+            partition,
+            config,
+            conflict_orientation=(
+                normalized_conflict_orientations[patient_id]
+                if normalized_conflict_orientations is not None
+                else None
+            ),
+        )
         for patient_id in patient_ids
     ]

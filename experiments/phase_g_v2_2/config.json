@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "implementation_version": "phase_g_v2_2",
+  "protocol_status": "draft_unapproved",
+  "execution_enabled": false,
+  "test_data_access": "forbidden",
+  "authorized_conditions": [],
+  "remaining_conditions": [
+    "image_dominant",
+    "clinical_dominant",
+    "redundant",
+    "conflicting",
+    "synergistic"
+  ],
+  "condition_definitions": {
+    "image_dominant": {
+      "phase_g_condition": {
+        "image_reliability": 0.95,
+        "clinical_reliability": 0.6,
+        "noise": "independent_uniform_other_class"
+      }
+    },
+    "clinical_dominant": {
+      "phase_g_condition": {
+        "image_reliability": 0.6,
+        "clinical_reliability": 0.95,
+        "noise": "independent_uniform_other_class"
+      }
+    },
+    "redundant": {
+      "phase_g_condition": {
+        "shared_latent_noisy_class_reliability": 0.85
+      }
+    },
+    "conflicting": {
+      "phase_g_condition": {
+        "conflict_fraction": 0.5,
+        "conflict_orientation": "balanced_image_correct_vs_clinical_correct",
+        "conflict_decoy": "uniform_among_other_five_classes",
+        "non_conflict_noise": "independent_uniform_other_class_at_0.85",
+        "expected_marginal_reliability": 0.675
+      },
+      "image_correct_fraction": 0.25,
+      "clinical_correct_fraction": 0.25,
+      "independent_fraction": 0.5,
+      "independent_image_reliability": 0.85,
+      "independent_clinical_reliability": 0.85,
+      "decoy_semantics": "uniform_among_other_five_classes"
+    },
+    "synergistic": {
+      "phase_g_condition": {
+        "construction": "image_share_U_clinical_share_Y_minus_U_mod_6",
+        "image_share_distribution": "uniform",
+        "component_corruption_probability": 0.15,
+        "component_corruption": "uniform_among_other_five_share_values",
+        "individual_share_label_information": "none_before_joint_decoding",
+        "reliability_semantics": "share_retention_not_label_accuracy"
+      },
+      "share_retention_probability": 0.85,
+      "corruption_semantics": "uniform_among_other_five_share_values"
+    }
+  },
+  "conflicting_generator": {
+    "image_correct_fraction": 0.25,
+    "clinical_correct_fraction": 0.25,
+    "independent_fraction": 0.50,
+    "independent_image_reliability": 0.85,
+    "independent_clinical_reliability": 0.85,
+    "decoy_semantics": "uniform_among_other_five_classes"
+  },
+  "master_seed": 20261119,
+  "slic_seed": 20261144,
+  "full_training_started": false,
+  "remaining_condition_runs_started": false
+}

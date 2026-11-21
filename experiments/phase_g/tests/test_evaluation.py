@@ -8,7 +8,12 @@ import numpy as np
 import torch
 from torch import nn
 
+import experiments.phase_g.evaluate as phase_g_evaluate
+import experiments.phase_g.explain as phase_g_explain
+from experiments.phase_g.explain import _blur
 from experiments.phase_g.evaluate import (
+    _ranked_variants,
+    _random_lesion_translation,
     bootstrap_mean_interval,
     build_localization_controls,
     deletion_insertion_metrics,
@@ -62,6 +67,19 @@ class PhaseGEvaluationTests(unittest.TestCase):
             "lesion": cls.patient.lesion_mask[None, ...],
             "marker": cls.patient.marker_mask[None, ...],
         }
+
+    def test_random_lesion_translation_finds_disjoint_location_when_sampling_is_sparse(self):
+        lesion = np.zeros((224, 224), dtype=bool)
+        lesion[96:128, 96:128] = True
+        occupied = np.ones((224, 224), dtype=bool)
+        occupied[96:128, 96:128] = False
+        occupied[0:224, 128:224] = False
+        rng = np.random.default_rng(20261129)
+
+        translated = _random_lesion_translation(lesion, occupied, rng)
+
+        self.assertEqual(translated.sum(), lesion.sum())
+        self.assertFalse(np.any(translated & occupied))
 
     def test_localization_reports_mass_area_enrichment_and_random_regions(self):
         controls = build_localization_controls(self.masks, seed=13, repeats=3)
@@ -141,6 +159,71 @@ class PhaseGEvaluationTests(unittest.TestCase):
         self.assertAlmostEqual(float(result["temperature"]), 2.0)
         self.assertNotIn("marker_mass", result)
         self.assertEqual(result["outcome_type"].item(), "faithfulness")
+
+    def test_batched_ranked_variants_match_reference_patch_replacement(self):
+        create_batched = getattr(
+            phase_g_evaluate, "_ranked_variants_batched", None
+        )
+        self.assertTrue(callable(create_batched), "GPU-batched patch construction is required")
+        originals = torch.rand(2, 3, 224, 224)
+        baselines = torch.rand(2, 3, 224, 224)
+        orders = np.stack(
+            (
+                np.arange(196, dtype=np.int64),
+                np.arange(195, -1, -1, dtype=np.int64),
+            )
+        )
+        patch_counts = np.asarray([0, 16, 196], dtype=np.int64)
+
+        variants = create_batched(
+            originals,
+            baselines,
+            orders,
+            patch_counts,
+            torch.device("cpu"),
+        )
+
+        self.assertEqual(tuple(variants.shape), (2, 2, 3, 3, 224, 224))
+        for row in range(2):
+            deletion, insertion = _ranked_variants(
+                originals[row], baselines[row], orders[row], patch_counts
+            )
+            expected = torch.stack((torch.stack(deletion), torch.stack(insertion)))
+            torch.testing.assert_close(variants[row], expected)
+
+    def test_batched_occlusion_matches_explicit_patch_interventions(self):
+        compute_batched = getattr(phase_g_explain, "_occlusion_batched", None)
+        self.assertTrue(callable(compute_batched), "batched GPU occlusion is required")
+        model = _ToyModel().eval()
+        image = self.image.float().div(255.0)
+        target = self.patient.label
+        baseline = _blur(image[0])
+        with torch.no_grad():
+            original_score = torch.softmax(model(image), dim=1)[0, target].item()
+        expected = np.zeros((14, 14), dtype=np.float32)
+        for patch in range(196):
+            top, left = divmod(patch, 14)
+            variant = image[0].clone()
+            variant[:, top * 16:(top + 1) * 16, left * 16:(left + 1) * 16] = (
+                baseline[:, top * 16:(top + 1) * 16, left * 16:(left + 1) * 16]
+            )
+            with torch.no_grad():
+                score = torch.softmax(model(variant.unsqueeze(0)), dim=1)[0, target].item()
+            expected.reshape(-1)[patch] = max(original_score - score, 0.0)
+        if expected.max() > 1e-8:
+            expected /= expected.max()
+
+        result = compute_batched(
+            model,
+            "image_only",
+            image,
+            None,
+            torch.as_tensor([target]),
+            batch_size=16,
+            temperature=1.0,
+        )
+
+        np.testing.assert_allclose(result[0], expected, rtol=1e-2, atol=2e-3)
 
     def test_stability_keeps_prediction_changes_and_map_similarity_separate(self):
         torch.manual_seed(29)

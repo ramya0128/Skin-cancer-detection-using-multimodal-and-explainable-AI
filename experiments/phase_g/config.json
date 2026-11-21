@@ -106,6 +106,46 @@
     "image_cue_values": "uniform_six_categories",
     "clinical_cue_values": "uniform_six_categories"
   },
+  "explanation_evaluation": {
+    "image_methods": [
+      "gradcam",
+      "chefer",
+      "attention_rollout",
+      "occlusion"
+    ],
+    "image_batch_size": 16,
+    "occlusion_batch_size": 16,
+    "occlusion_gaussian_blur_radius": 6.0,
+    "clinical_reference": "uniform_six_categories",
+    "localization": {
+      "area_matched_repeats": 20,
+      "seed": 20261124,
+      "random_map_repeats": 20,
+      "center_gaussian_sigma": 3.5
+    },
+    "faithfulness": {
+      "patch_steps": 21,
+      "random_order_count": 20,
+      "seed": 20261125,
+      "gaussian_blur_radius": 6.0,
+      "curve_batch_size": 64,
+      "natural_baseline": "background_canvas"
+    },
+    "stability": {
+      "transforms": [
+        "horizontal_flip",
+        "brightness_0.9",
+        "brightness_1.1"
+      ],
+      "image_batch_size": 16
+    },
+    "statistics": {
+      "descriptive_bootstrap_replicates": 2000,
+      "descriptive_bootstrap_seed": 20261126,
+      "paired_signflip_draws": 10000,
+      "paired_signflip_seed": 20261127
+    }
+  },
   "model": {
     "initialization": "scratch",
     "pretrained_weights": false,
@@ -325,6 +365,7 @@
   "shapley": {
     "background_patients": 200,
     "background_partition": "synthetic_training_only_class_stratified",
+    "seed": 20261128,
     "efficiency_tolerance": 0.00001
   },
   "primary_incremental_prediction_criterion": {

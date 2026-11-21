@@ -1,0 +1,10 @@
+sessions:
+  - id: "2026-11-18_001"
+    date: "2026-11-18"
+    summary: "Completed a focused read-only literature/novelty audit, marked Phases F-H blocked or deferred, and verified saved output hashes."
+    events_count: 5
+    claims_touched:
+      - C01
+      - C02
+      - C03
+    open_threads: 4

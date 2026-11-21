@@ -1,0 +1,42 @@
+tree:
+  - id: N01
+    type: question
+    title: Validate multimodal skin-lesion explanations and identify defensible next work
+    provenance: user
+    timestamp: "2026-11-18"
+    description: >
+      Determine what the saved model and explanation outputs establish, audit
+      related work, and proceed without repeating training or using the test set
+      for method development.
+    children:
+      - id: N02
+        type: decision
+        title: Continue with read-only checks
+        provenance: user
+        timestamp: "2026-11-18"
+        choice: >
+          Do not rerun notebooks, retrain models, or perform new inference;
+          advance only through read-only artifact, dataset-presence, and
+          literature checks.
+        alternatives:
+          - "Run the missing faithfulness/stability computations"
+          - "Train models for the planted-cue benchmark"
+        evidence: "The user explicitly selected read-only continuation."
+      - id: N03
+        type: experiment
+        title: Verify saved-output integrity and document literature overlap
+        provenance: ai-executed
+        timestamp: "2026-11-18"
+        result: >
+          All 20 saved output files matched their pre-update SHA-256 manifest
+          entries. A focused literature matrix identified close multimodal
+          explainability and PAD-UFES-20 fusion work; the audit remains partial
+          because several citations and full-text comparisons are unresolved.
+          No model inference, retraining, or notebook rerun occurred.
+        evidence:
+          - "artifact_manifest.json"
+          - "LITERATURE_NOVELTY_AUDIT.md"
+          - "ARTIFACT_AUDIT.md"
+        claims_tested:
+          - C01
+          - C03

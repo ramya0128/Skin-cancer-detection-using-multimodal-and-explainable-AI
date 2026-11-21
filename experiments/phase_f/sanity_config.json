@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "seed": 42,
+  "transformations": [
+    "horizontal_flip",
+    "brightness_0.9",
+    "brightness_1.1"
+  ],
+  "randomization_stages": [
+    {
+      "name": "head",
+      "seed": 42
+    },
+    {
+      "name": "final_encoder_block_and_head",
+      "seed": 43
+    },
+    {
+      "name": "full_encoder_and_head",
+      "seed": 44
+    }
+  ],
+  "blur_radius": 32,
+  "patch_size": 16,
+  "patch_stride": 16,
+  "image_batch_size": 8,
+  "occlusion_batch_size": 32,
+  "chunk_size": 4,
+  "ssim": {
+    "implementation": "skimage.metrics.structural_similarity",
+    "data_range": 1.0,
+    "win_size": 7,
+    "gaussian_weights": false
+  },
+  "spearman": {
+    "rank_ties": "average",
+    "constant_map_result": "undefined"
+  },
+  "test_scope": "fixed exploratory evaluation; no test-driven protocol changes",
+  "output_directory": "outputs\\phase_f_v1"
+}

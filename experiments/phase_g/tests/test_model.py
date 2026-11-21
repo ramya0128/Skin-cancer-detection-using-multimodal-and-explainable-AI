@@ -1,10 +1,14 @@
 import json
+import copy
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import torch
 
-from experiments.phase_g.model import build_model, classification_loss
+from experiments.phase_g.generate import render_patient
+from experiments.phase_g.model import build_model, classification_loss, train_model
 
 
 CONFIG_PATH = Path(__file__).resolve().parents[1] / "config.json"
@@ -74,6 +78,36 @@ class PhaseGModelTests(unittest.TestCase):
         loss = classification_loss(logits, labels)
         expected = torch.nn.functional.cross_entropy(logits, labels)
         self.assertTrue(torch.equal(loss, expected))
+
+    def test_interrupted_checkpoint_write_does_not_leave_a_partial_checkpoint(self):
+        config = copy.deepcopy(load_config())
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config["output_directory"] = temp_dir
+            config["model"]["training"]["batch_size"] = 2
+            config["model"]["training"]["maximum_epochs"] = 1
+            config["model"]["training"]["early_stopping"]["patience"] = 1
+            train_data = [
+                render_patient(f"atomic-train-{index}", index, "train", config)
+                for index in range(2)
+            ]
+            selection_data = [
+                render_patient(f"atomic-selection-{index}", index, "validation_model_selection", config)
+                for index in range(2)
+            ]
+
+            checkpoint_path = Path(temp_dir) / "checkpoints" / "clinical_only.pt"
+
+            def interrupted_save(_payload, destination):
+                Path(destination).write_bytes(b"partial")
+                raise OSError("simulated interrupted checkpoint write")
+
+            with patch("torch.cuda.is_available", return_value=False):
+                with patch("torch.save", side_effect=interrupted_save):
+                    with self.assertRaisesRegex(OSError, "simulated interrupted"):
+                        train_model("clinical_only", train_data, selection_data, config)
+
+            self.assertFalse(checkpoint_path.exists())
+            self.assertEqual(list(checkpoint_path.parent.glob("*.tmp")), [])
 
 
 if __name__ == "__main__":

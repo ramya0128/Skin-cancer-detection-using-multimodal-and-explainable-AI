@@ -1,0 +1,297 @@
+{
+  "schema_version": 1,
+  "generated_at_local": "2026-11-18T21:25:52+05:30",
+  "purpose": "Read-only inventory of saved project artifacts; no model fitting, notebook reruns, or inference.",
+  "output_files": [
+    {
+      "path": "D:\\skin_project\\outputs\\base_outputs_v1.npz",
+      "label": "outputs\\base_outputs_v1.npz",
+      "size_bytes": 233731,
+      "last_write_local": "2026-10-14T23:27:47+05:30",
+      "sha256": "ad06fba566be1b532d4b8e4d4e74e659a0e9683c268a3de2480d7e6e776b25a6"
+    },
+    {
+      "path": "D:\\skin_project\\outputs\\fusion_v1.json",
+      "label": "outputs\\fusion_v1.json",
+      "size_bytes": 259,
+      "last_write_local": "2026-10-31T14:14:49+05:30",
+      "sha256": "d89c51a205b7f109771fa945d5b255a4018c5bf721a87d2fdd3640ce5dbcfdb1"
+    },
+    {
+      "path": "D:\\skin_project\\outputs\\fusion_v1.npz",
+      "label": "outputs\\fusion_v1.npz",
+      "size_bytes": 322220,
+      "last_write_local": "2026-10-31T14:14:49+05:30",
+      "sha256": "95e00758dac79beeb68479390f507315ff555e2b6ceafc52a617e371fb2a386b"
+    },
+    {
+      "path": "D:\\skin_project\\outputs\\global_importance_by_output_class_v2.csv",
+      "label": "outputs\\global_importance_by_output_class_v2.csv",
+      "size_bytes": 4336,
+      "last_write_local": "2026-11-18T21:00:29+05:30",
+      "sha256": "efc7ef1143174bde2c7a61ebbbabea342bad39646e6991e495073579d333e64f"
+    },
+    {
+      "path": "D:\\skin_project\\outputs\\image_explainers_v1.npz",
+      "label": "outputs\\image_explainers_v1.npz",
+      "size_bytes": 1022518,
+      "last_write_local": "2026-11-18T15:01:29+05:30",
+      "sha256": "a19ff198a2cff4cf4beee486c367c2a72c096ced03a82c9e39aab1bc3af6eed9"
+    },
+    {
+      "path": "D:\\skin_project\\outputs\\meta_mlp_v1.pt",
+      "label": "outputs\\meta_mlp_v1.pt",
+      "size_bytes": 19149,
+      "last_write_local": "2026-10-31T14:14:49+05:30",
+      "sha256": "503e476b38d5f56de84c638073138b7b04c7c0b3b20ab1dd72d034ea19a0ca09"
+    },
+    {
+      "path": "D:\\skin_project\\outputs\\modality_shapley_v1.npz",
+      "label": "outputs\\modality_shapley_v1.npz",
+      "size_bytes": 133078,
+      "last_write_local": "2026-10-31T14:25:43+05:30",
+      "sha256": "4140ce04ee320e95b256d8b4a1fa978ae49d5daf72dfa9ff35340dc0aad53260"
+    },
+    {
+      "path": "D:\\skin_project\\outputs\\modality_shapley_v2.npz",
+      "label": "outputs\\modality_shapley_v2.npz",
+      "size_bytes": 484796,
+      "last_write_local": "2026-11-17T21:44:31+05:30",
+      "sha256": "bbb6f48f3db0d8f62cdf87cf4386d1047ed6d905f785a8c629e92fbd1d99508d"
+    },
+    {
+      "path": "D:\\skin_project\\outputs\\modality_shapley_v2_oof_checkpoint.npz",
+      "label": "outputs\\modality_shapley_v2_oof_checkpoint.npz",
+      "size_bytes": 210734,
+      "last_write_local": "2026-11-17T15:53:55+05:30",
+      "sha256": "927da2ab7ca1aa81bdfaab6e1071f1522b7b117de2a2dd7d439e580f43ef0245"
+    },
+    {
+      "path": "D:\\skin_project\\outputs\\modality_shapley_v2b_randombg.npz",
+      "label": "outputs\\modality_shapley_v2b_randombg.npz",
+      "size_bytes": 216858,
+      "last_write_local": "2026-11-18T11:52:24+05:30",
+      "sha256": "0fccf867b7bd082b68c51d2f5e32c9265e391cabb94febbae81a68720b19c3f1"
+    },
+    {
+      "path": "D:\\skin_project\\outputs\\MODEL_REGISTRY.json",
+      "label": "outputs\\MODEL_REGISTRY.json",
+      "size_bytes": 5610,
+      "last_write_local": "2026-11-18T12:00:25+05:30",
+      "sha256": "7c647b6fdb938e90b1e86b4dd0a730a84689524e23cdff3c2562997e2b64fed7"
+    },
+    {
+      "path": "D:\\skin_project\\outputs\\oof_vit_partial.npy",
+      "label": "outputs\\oof_vit_partial.npy",
+      "size_bytes": 88304,
+      "last_write_local": "2026-10-14T21:59:47+05:30",
+      "sha256": "76a7e33b1cbaddd4f467ec4f9c7e52ffe158c9f97bf5becbdc9592f0d8385130"
+    },
+    {
+      "path": "D:\\skin_project\\outputs\\oof_vit_tmp.npy",
+      "label": "outputs\\oof_vit_tmp.npy",
+      "size_bytes": 88304,
+      "last_write_local": "2026-10-14T21:59:48+05:30",
+      "sha256": "76a7e33b1cbaddd4f467ec4f9c7e52ffe158c9f97bf5becbdc9592f0d8385130"
+    },
+    {
+      "path": "D:\\skin_project\\outputs\\shortcut_attribution_by_predicted_class_v2.csv",
+      "label": "outputs\\shortcut_attribution_by_predicted_class_v2.csv",
+      "size_bytes": 4234,
+      "last_write_local": "2026-11-18T21:00:29+05:30",
+      "sha256": "bf1ada5f93071d1f4de1a8fa4a10ba57d3cfa67493cd75299d18fe72bd5f842f"
+    },
+    {
+      "path": "D:\\skin_project\\outputs\\shortcut_audit_by_diagnosis_v2.csv",
+      "label": "outputs\\shortcut_audit_by_diagnosis_v2.csv",
+      "size_bytes": 4137,
+      "last_write_local": "2026-11-18T21:00:29+05:30",
+      "sha256": "026a8dfee3ada473b3c797f2b2e170eece7e8b2ab92ddf13477a735a77ddffe0"
+    },
+    {
+      "path": "D:\\skin_project\\outputs\\split_v1.json",
+      "label": "outputs\\split_v1.json",
+      "size_bytes": 136070,
+      "last_write_local": "2026-10-14T20:20:04+05:30",
+      "sha256": "c3291ad86cbe120f56457adabb2292de71c219c5b0b2b34f83f27d80c556ae8b"
+    },
+    {
+      "path": "D:\\skin_project\\outputs\\treeshap_v1.npz",
+      "label": "outputs\\treeshap_v1.npz",
+      "size_bytes": 511626,
+      "last_write_local": "2026-11-18T13:44:01+05:30",
+      "sha256": "2cbd1665b82dfa3d17fb069d3d619c05b17901b11cf1af3137b832b1841936f0"
+    },
+    {
+      "path": "D:\\skin_project\\outputs\\visual_audit_image_explainers_v1.png",
+      "label": "outputs\\visual_audit_image_explainers_v1.png",
+      "size_bytes": 2605620,
+      "last_write_local": "2026-11-18T21:00:45+05:30",
+      "sha256": "886987e39985f980760c4eb4817660a771fcf9cce8d52a0a40f08b4c0608a319"
+    },
+    {
+      "path": "D:\\skin_project\\outputs\\vit_final_v1.pt",
+      "label": "outputs\\vit_final_v1.pt",
+      "size_bytes": 343275071,
+      "last_write_local": "2026-10-14T22:54:35+05:30",
+      "sha256": "601e57558f2968f46c2c43417f5c3139c09edf6abfa358eeba759caeced1639c"
+    },
+    {
+      "path": "D:\\skin_project\\outputs\\xgb_final_v1.joblib",
+      "label": "outputs\\xgb_final_v1.joblib",
+      "size_bytes": 1197038,
+      "last_write_local": "2026-10-14T20:20:49+05:30",
+      "sha256": "3000cdcc1b10d1087f703258ab6e6fa3737c753c6706b482df9da1267c42df97"
+    }
+  ],
+  "project_files": [
+    {
+      "path": "D:\\skin_project\\04_treeshap.ipynb",
+      "label": "04_treeshap.ipynb",
+      "size_bytes": 28233,
+      "last_write_local": "2026-11-18T13:44:29+05:30",
+      "sha256": "0987d24763d169008fe4a22858a69461d6155ae923d595ced52c96aa5dd8c339"
+    },
+    {
+      "path": "D:\\skin_project\\05_image_explainers.ipynb",
+      "label": "05_image_explainers.ipynb",
+      "size_bytes": 214730,
+      "last_write_local": "2026-11-18T20:54:21+05:30",
+      "sha256": "cb1fd336447a41e39cf8da06f7d7269fe6c819fabc6d1e673c31508440efbd9f"
+    },
+    {
+      "path": "D:\\skin_project\\ANALYSIS_PLAN.md",
+      "label": "ANALYSIS_PLAN.md",
+      "size_bytes": 11290,
+      "last_write_local": "2026-11-18T21:25:41+05:30",
+      "sha256": "c84095d6dad9c378cc01dc015026ed980bbc08b34bfa6220e551c97b4ab9928b"
+    },
+    {
+      "path": "D:\\skin_project\\ARTIFACT_AUDIT.md",
+      "label": "ARTIFACT_AUDIT.md",
+      "size_bytes": 8562,
+      "last_write_local": "2026-11-18T21:25:41+05:30",
+      "sha256": "386b54e5ba462703c045a8ac80976ea499a9a37c37bb3266c18083a79dd34389"
+    },
+    {
+      "path": "D:\\skin_project\\CONTEXT.md",
+      "label": "CONTEXT.md",
+      "size_bytes": 4454,
+      "last_write_local": "2026-11-17T22:13:52+05:30",
+      "sha256": "21d7890ee6ec96afad5f7d47696565061e5d6328a2cb4ecf165bb719661c223d"
+    },
+    {
+      "path": "D:\\skin_project\\DATA_AUDIT.md",
+      "label": "DATA_AUDIT.md",
+      "size_bytes": 5891,
+      "last_write_local": "2026-11-18T21:04:34+05:30",
+      "sha256": "f2fc74779c88e9e4ecb9eefea2a94623ed5926b547ce6f3e0b1fbb4793248a11"
+    },
+    {
+      "path": "D:\\skin_project\\LITERATURE_NOVELTY_AUDIT.md",
+      "label": "LITERATURE_NOVELTY_AUDIT.md",
+      "size_bytes": 11614,
+      "last_write_local": "2026-11-18T21:24:37+05:30",
+      "sha256": "1d42f1936654e624cf523eeeadf8b0f9c5284e7afd9022170a6a1dee86e77760"
+    },
+    {
+      "path": "D:\\skin_project\\NOTEBOOK_04_05_AUDIT.md",
+      "label": "NOTEBOOK_04_05_AUDIT.md",
+      "size_bytes": 8223,
+      "last_write_local": "2026-11-18T21:06:40+05:30",
+      "sha256": "8c11c13c8990a5b3cb6ed47fa8608d2f69e133d92e7aa48445b3ed08aed7d7e3"
+    },
+    {
+      "path": "D:\\skin_project\\README.md",
+      "label": "README.md",
+      "size_bytes": 4577,
+      "last_write_local": "2026-11-17T22:14:20+05:30",
+      "sha256": "fcd0ff6df2b29a07a551b4330fd1281022089fd5337e1c8dc5dd2633b09b6d86"
+    }
+  ],
+  "reference_documents": [
+    {
+      "path": "D:\\D DRIVE DOWNLOADS\\Updated_Master_Agent_Instructions_Skin_Lesion_Research.docx",
+      "label": "D:\\D DRIVE DOWNLOADS\\Updated_Master_Agent_Instructions_Skin_Lesion_Research.docx",
+      "size_bytes": 43361,
+      "last_write_local": "2026-11-18T20:53:57+05:30",
+      "sha256": "d933d5463b197bb40c1307bf820ebe300df88d894b0d74a34867218775dd2d36"
+    },
+    {
+      "path": "D:\\D DRIVE DOWNLOADS\\Skin_Lesion_Project_and_Evaluation_Plan.docx",
+      "label": "D:\\D DRIVE DOWNLOADS\\Skin_Lesion_Project_and_Evaluation_Plan.docx",
+      "size_bytes": 42120,
+      "last_write_local": "2026-11-18T18:15:42+05:30",
+      "sha256": "f644d732ceb1ca11851cceb9170753baa4685d360e3dd6196cc5368161087881"
+    },
+    {
+      "path": "D:\\D DRIVE DOWNLOADS\\paper_plan_for_agent.md",
+      "label": "D:\\D DRIVE DOWNLOADS\\paper_plan_for_agent.md",
+      "size_bytes": 14771,
+      "last_write_local": "2026-11-18T18:15:44+05:30",
+      "sha256": "5ddab8b85c0ccb9ef15807091a7be98ffbd6e72d76e2667e877ea11fe6b85c3f"
+    }
+  ],
+  "notebook_execution": [
+    {
+      "path": "D:\\skin_project\\04_treeshap.ipynb",
+      "code_cells": 10,
+      "executed_code_cells": 10,
+      "saved_errors": []
+    },
+    {
+      "path": "D:\\skin_project\\05_image_explainers.ipynb",
+      "code_cells": 6,
+      "executed_code_cells": 6,
+      "saved_errors": []
+    }
+  ],
+  "recorded_environment_metadata": {
+    "treeshap_v1.npz": {
+      "numpy": "2.2.5",
+      "pandas": "2.3.3",
+      "python": "3.13.7",
+      "scikit-learn": "1.6.1",
+      "scipy": "1.15.3",
+      "shap": "0.52.0",
+      "xgboost": "3.2.0"
+    },
+    "modality_shapley_v2.npz": {
+      "python": "3.11.15",
+      "numpy": "2.4.3",
+      "pandas": "3.0.1",
+      "scikit-learn": "1.7.1",
+      "torch": "2.12.0.dev20260401+cu128",
+      "torchvision": "0.27.0.dev20260401+cu128",
+      "xgboost": "3.2.0"
+    },
+    "image_explainers_v1.npz": {
+      "attention_rollout": "head-mean attention with identity residual; class-independent",
+      "blur_radius": 32,
+      "chefer": "positive attention-times-class-logit-gradient, head mean, residual rollout",
+      "cuda_runtime": "12.8",
+      "device": "NVIDIA GeForce RTX 5050 Laptop GPU",
+      "gradcam_layer": "model.encoder.layers[-1].ln_1; class-logit gradients",
+      "gradient_batch_size": 8,
+      "normalization": "ReLU then per-map min-max; constant maps become zeros",
+      "numpy": "2.4.6",
+      "occlusion": "replace each raw 16x16 patch with the corresponding Gaussian-blurred pixels; report target-probability drop",
+      "occlusion_batch_size": 32,
+      "patch_size": 16,
+      "patch_stride": 16,
+      "pillow": "13.0.0",
+      "primary_target": "frozen CWF test predicted class; ViT attribution uses that class logit/probability",
+      "python": "3.11.15",
+      "scope": "frozen test set only; final saved ViT; no training; no OOF image maps",
+      "secondary_target": "recomputed final ViT top class",
+      "torch": "2.7.1+cu128",
+      "torchvision": "0.22.1+cu128"
+    }
+  },
+  "provenance_notes": [
+    "image_explainers_v1.npz last-write time precedes 05_image_explainers.ipynb last-write time; exact latest-source-to-output correspondence is unverified.",
+    "04_treeshap.ipynb records SHAP 0.52.0 and XGBoost 3.2.0; MODEL_REGISTRY.json records XGBoost 3.4.1 for the saved model environment.",
+    "Dataset licensing terms are not verified; see DATA_AUDIT.md."
+  ],
+  "manifest_self_hash": "excluded to avoid a self-referential digest"
+}

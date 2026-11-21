@@ -2,6 +2,7 @@ import hashlib
 import json
 import tempfile
 import unittest
+import copy
 from pathlib import Path
 from unittest.mock import patch
 
@@ -75,6 +76,22 @@ class PhaseGIOTests(unittest.TestCase):
                     resume=True,
                 )
 
+    def test_interrupted_run_identity_write_leaves_no_partial_run(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "pilot"
+
+            with patch.object(Path, "write_text", side_effect=OSError("interrupted")):
+                with self.assertRaisesRegex(OSError, "interrupted"):
+                    prepare_run_dir(
+                        output_dir,
+                        config_hash="config-sha",
+                        source_hashes={"run.py": "source-sha"},
+                        resume=False,
+                    )
+
+            self.assertFalse((output_dir / "run_identity.json").exists())
+            self.assertFalse(output_dir.exists())
+
     def test_protected_hashing_reads_raw_bytes_without_loading_arrays(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -104,6 +121,19 @@ class PhaseGIOTests(unittest.TestCase):
         unauthorized["pilot_condition"] = "image_dominant"
         with self.assertRaises(ValueError):
             validate_config(unauthorized)
+
+    def test_explanation_and_secondary_statistics_are_frozen_in_config(self):
+        config = load_config()
+
+        invalid = copy.deepcopy(config)
+        invalid["explanation_evaluation"]["faithfulness"]["random_order_count"] = 19
+        with self.assertRaises(ValueError):
+            validate_config(invalid)
+
+        invalid = copy.deepcopy(config)
+        invalid["explanation_evaluation"]["statistics"]["paired_signflip_draws"] = 9999
+        with self.assertRaises(ValueError):
+            validate_config(invalid)
 
 
 if __name__ == "__main__":

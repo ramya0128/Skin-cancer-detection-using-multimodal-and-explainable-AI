@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +68,64 @@ def validate_config(config: dict[str, Any]) -> None:
         raise ValueError("primary NLL bootstrap count must be 10,000")
     if primary.get("full_accuracy_floor") != 0.8:
         raise ValueError("joint accuracy floor must be 0.80")
+    explanation = config.get("explanation_evaluation", {})
+    if explanation.get("image_methods") != [
+        "gradcam",
+        "chefer",
+        "attention_rollout",
+        "occlusion",
+    ]:
+        raise ValueError("image explanation methods differ from the approved design")
+    if explanation.get("image_batch_size") != 16:
+        raise ValueError("image explanation batch size differs from the frozen design")
+    if explanation.get("occlusion_batch_size") != 16:
+        raise ValueError("occlusion batch size differs from the frozen design")
+    if explanation.get("occlusion_gaussian_blur_radius") != 6.0:
+        raise ValueError("occlusion blur radius differs from the frozen design")
+    if explanation.get("clinical_reference") != "uniform_six_categories":
+        raise ValueError("clinical explanation reference must be uniform over six categories")
+    localization = explanation.get("localization", {})
+    if (
+        localization.get("area_matched_repeats") != 20
+        or localization.get("random_map_repeats") != 20
+        or localization.get("seed") != 20261124
+        or localization.get("center_gaussian_sigma") != 3.5
+    ):
+        raise ValueError("localization controls differ from the approved design")
+    faithfulness = explanation.get("faithfulness", {})
+    if (
+        faithfulness.get("patch_steps") != 21
+        or faithfulness.get("random_order_count") != 20
+        or faithfulness.get("seed") != 20261125
+        or faithfulness.get("gaussian_blur_radius") != 6.0
+        or faithfulness.get("curve_batch_size") != 64
+        or faithfulness.get("natural_baseline") != "background_canvas"
+    ):
+        raise ValueError("faithfulness settings differ from the approved design")
+    stability = explanation.get("stability", {})
+    if (
+        stability.get("transforms")
+        != ["horizontal_flip", "brightness_0.9", "brightness_1.1"]
+        or stability.get("image_batch_size") != 16
+    ):
+        raise ValueError("stability transforms differ from the approved design")
+    statistics = explanation.get("statistics", {})
+    if (
+        statistics.get("descriptive_bootstrap_replicates") != 2000
+        or statistics.get("descriptive_bootstrap_seed") != 20261126
+        or statistics.get("paired_signflip_draws") != 10000
+        or statistics.get("paired_signflip_seed") != 20261127
+    ):
+        raise ValueError("secondary statistical settings differ from the approved design")
+    shapley = config.get("shapley", {})
+    if (
+        shapley.get("background_patients") != 200
+        or shapley.get("background_partition")
+        != "synthetic_training_only_class_stratified"
+        or shapley.get("seed") != 20261128
+        or shapley.get("efficiency_tolerance") != 0.00001
+    ):
+        raise ValueError("Shapley donor settings differ from the approved design")
     if config.get("output_directory") != (
         "outputs/synthetic_phase_g_v1/pilot_balanced_085_085_v1"
     ):
@@ -112,10 +171,19 @@ def prepare_run_dir(
         if resume:
             raise FileNotFoundError(f"cannot resume missing output directory: {output_dir}")
         output_dir.mkdir(parents=True)
-        identity_path.write_text(
-            json.dumps(identity, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        temporary_path = identity_path.with_name(identity_path.name + ".tmp")
+        try:
+            temporary_path.write_text(
+                json.dumps(identity, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            os.replace(temporary_path, identity_path)
+        except Exception:
+            if temporary_path.exists():
+                temporary_path.unlink()
+            if not any(output_dir.iterdir()):
+                output_dir.rmdir()
+            raise
         return
 
     if not resume:
