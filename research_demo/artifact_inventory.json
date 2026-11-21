@@ -1,0 +1,784 @@
+{
+  "generated_local": "2026-11-21T18:39:12+05:30",
+  "note": "Read-only inventory of expected dashboard evidence; NPZ object arrays are not unpickled.",
+  "artifacts": [
+    {
+      "path": "outputs/split_v1.json",
+      "category": "Real-data split",
+      "exists": true,
+      "size_bytes": 136070,
+      "modified_local": "2026-10-14T20:20:04+05:30"
+    },
+    {
+      "path": "outputs/base_outputs_v1.npz",
+      "category": "Real-data predictions",
+      "exists": true,
+      "size_bytes": 233731,
+      "modified_local": "2026-10-14T23:27:47+05:30",
+      "arrays": {
+        "oof_xgb": {
+          "shape": [
+            1837,
+            6
+          ],
+          "dtype": "float64"
+        },
+        "oof_vit": {
+          "shape": [
+            1837,
+            6
+          ],
+          "dtype": "float64"
+        },
+        "test_xgb": {
+          "shape": [
+            461,
+            6
+          ],
+          "dtype": "float32"
+        },
+        "test_vit": {
+          "shape": [
+            461,
+            6
+          ],
+          "dtype": "float32"
+        },
+        "y_train": {
+          "shape": [
+            1837
+          ],
+          "dtype": "int64"
+        },
+        "y_test": {
+          "shape": [
+            461
+          ],
+          "dtype": "int64"
+        },
+        "fold": {
+          "shape": [
+            1837
+          ],
+          "dtype": "int64"
+        }
+      },
+      "skipped_arrays": {
+        "classes": "Object array skipped; pickle loading is disabled."
+      }
+    },
+    {
+      "path": "outputs/fusion_v1.npz",
+      "category": "Fusion predictions",
+      "exists": true,
+      "size_bytes": 322220,
+      "modified_local": "2026-10-31T14:14:49+05:30",
+      "arrays": {
+        "selected": {
+          "shape": [],
+          "dtype": "<U3"
+        },
+        "classes": {
+          "shape": [
+            6
+          ],
+          "dtype": "<U3"
+        },
+        "w_xgb": {
+          "shape": [
+            6
+          ],
+          "dtype": "float64"
+        },
+        "cwf_oof": {
+          "shape": [
+            1837,
+            6
+          ],
+          "dtype": "float64"
+        },
+        "mfm_oof": {
+          "shape": [
+            1837,
+            6
+          ],
+          "dtype": "float64"
+        },
+        "cwf_test": {
+          "shape": [
+            461,
+            6
+          ],
+          "dtype": "float64"
+        },
+        "mfm_test": {
+          "shape": [
+            461,
+            6
+          ],
+          "dtype": "float32"
+        },
+        "sel_oof": {
+          "shape": [
+            1837,
+            6
+          ],
+          "dtype": "float64"
+        },
+        "sel_test": {
+          "shape": [
+            461,
+            6
+          ],
+          "dtype": "float64"
+        }
+      }
+    },
+    {
+      "path": "outputs/fusion_v1.json",
+      "category": "Fusion metadata",
+      "exists": true,
+      "size_bytes": 259,
+      "modified_local": "2026-10-31T14:14:49+05:30"
+    },
+    {
+      "path": "outputs/vit_final_v1.pt",
+      "category": "ViT checkpoint",
+      "exists": true,
+      "size_bytes": 343275071,
+      "modified_local": "2026-10-14T22:54:35+05:30"
+    },
+    {
+      "path": "outputs/xgb_final_v1.joblib",
+      "category": "XGBoost checkpoint",
+      "exists": true,
+      "size_bytes": 1197038,
+      "modified_local": "2026-10-14T20:20:49+05:30"
+    },
+    {
+      "path": "outputs/modality_shapley_v1.npz",
+      "category": "CWF explanation",
+      "exists": true,
+      "size_bytes": 133078,
+      "modified_local": "2026-10-31T14:25:43+05:30",
+      "arrays": {
+        "classes": {
+          "shape": [
+            6
+          ],
+          "dtype": "<U3"
+        },
+        "prior": {
+          "shape": [
+            6
+          ],
+          "dtype": "float64"
+        },
+        "w_xgb": {
+          "shape": [
+            6
+          ],
+          "dtype": "float64"
+        },
+        "oof_phiT": {
+          "shape": [
+            1837
+          ],
+          "dtype": "float64"
+        },
+        "oof_phiI": {
+          "shape": [
+            1837
+          ],
+          "dtype": "float64"
+        },
+        "oof_rho": {
+          "shape": [
+            1837
+          ],
+          "dtype": "float64"
+        },
+        "oof_pred": {
+          "shape": [
+            1837
+          ],
+          "dtype": "int64"
+        },
+        "oof_f": {
+          "shape": [
+            1837
+          ],
+          "dtype": "float64"
+        },
+        "oof_base": {
+          "shape": [
+            1837
+          ],
+          "dtype": "float64"
+        },
+        "test_phiT": {
+          "shape": [
+            461
+          ],
+          "dtype": "float64"
+        },
+        "test_phiI": {
+          "shape": [
+            461
+          ],
+          "dtype": "float64"
+        },
+        "test_rho": {
+          "shape": [
+            461
+          ],
+          "dtype": "float64"
+        },
+        "test_pred": {
+          "shape": [
+            461
+          ],
+          "dtype": "int64"
+        },
+        "test_f": {
+          "shape": [
+            461
+          ],
+          "dtype": "float64"
+        },
+        "test_base": {
+          "shape": [
+            461
+          ],
+          "dtype": "float64"
+        },
+        "oofU_rho": {
+          "shape": [
+            1837
+          ],
+          "dtype": "float64"
+        },
+        "testU_rho": {
+          "shape": [
+            461
+          ],
+          "dtype": "float64"
+        }
+      }
+    },
+    {
+      "path": "outputs/modality_shapley_v2.npz",
+      "category": "CWF explanation",
+      "exists": true,
+      "size_bytes": 484796,
+      "modified_local": "2026-11-17T21:44:31+05:30",
+      "arrays": {
+        "classes": {
+          "shape": [
+            6
+          ],
+          "dtype": "<U3"
+        },
+        "prior": {
+          "shape": [
+            6
+          ],
+          "dtype": "float64"
+        },
+        "uniform": {
+          "shape": [
+            6
+          ],
+          "dtype": "float64"
+        },
+        "w_xgb": {
+          "shape": [
+            6
+          ],
+          "dtype": "float64"
+        },
+        "oof_fold_w_xgb": {
+          "shape": [
+            5,
+            6
+          ],
+          "dtype": "float64"
+        },
+        "oof_fold": {
+          "shape": [
+            1837
+          ],
+          "dtype": "int64"
+        },
+        "oof_y": {
+          "shape": [
+            1837
+          ],
+          "dtype": "int64"
+        },
+        "test_y": {
+          "shape": [
+            461
+          ],
+          "dtype": "int64"
+        },
+        "oof_background_indices": {
+          "shape": [
+            5,
+            50
+          ],
+          "dtype": "int64"
+        },
+        "test_background_indices": {
+          "shape": [
+            50
+          ],
+          "dtype": "int64"
+        },
+        "oof_input_phiT": {
+          "shape": [
+            1837
+          ],
+          "dtype": "float64"
+        },
+        "oof_input_phiI": {
+          "shape": [
+            1837
+          ],
+          "dtype": "float64"
+        },
+        "oof_input_rho": {
+          "shape": [
+            1837
+          ],
+          "dtype": "float64"
+        },
+        "oof_input_pred": {
+          "shape": [
+            1837
+          ],
+          "dtype": "int64"
+        },
+        "oof_input_f": {
+          "shape": [
+            1837
+          ],
+          "dtype": "float64"
+        },
+        "oof_input_base": {
+          "shape": [
+            1837
+          ],
+          "dtype": "float64"
+        },
+        "oof_input_baseline_T": {
+          "shape": [
+            1837,
+            6
+          ],
+          "dtype": "float64"
+        },
+        "oof_input_baseline_I": {
+          "shape": [
+            1837,
+            6
+          ],
+          "dtype": "float64"
+        },
+        "test_input_phiT": {
+          "shape": [
+            461
+          ],
+          "dtype": "float64"
+        },
+        "test_input_phiI": {
+          "shape": [
+            461
+          ],
+          "dtype": "float64"
+        },
+        "test_input_rho": {
+          "shape": [
+            461
+          ],
+          "dtype": "float64"
+        },
+        "test_input_pred": {
+          "shape": [
+            461
+          ],
+          "dtype": "int64"
+        },
+        "test_input_f": {
+          "shape": [
+            461
+          ],
+          "dtype": "float64"
+        },
+        "test_input_base": {
+          "shape": [
+            461
+          ],
+          "dtype": "float64"
+        },
+        "test_input_baseline_T": {
+          "shape": [
+            461,
+            6
+          ],
+          "dtype": "float32"
+        },
+        "test_input_baseline_I": {
+          "shape": [
+            461,
+            6
+          ],
+          "dtype": "float32"
+        },
+        "oof_prob_phiT": {
+          "shape": [
+            1837
+          ],
+          "dtype": "float64"
+        },
+        "oof_prob_phiI": {
+          "shape": [
+            1837
+          ],
+          "dtype": "float64"
+        },
+        "oof_prob_rho": {
+          "shape": [
+            1837
+          ],
+          "dtype": "float64"
+        },
+        "oof_prob_pred": {
+          "shape": [
+            1837
+          ],
+          "dtype": "int64"
+        },
+        "oof_prob_f": {
+          "shape": [
+            1837
+          ],
+          "dtype": "float64"
+        },
+        "oof_prob_base": {
+          "shape": [
+            1837
+          ],
+          "dtype": "float64"
+        },
+        "test_prob_phiT": {
+          "shape": [
+            461
+          ],
+          "dtype": "float64"
+        },
+        "test_prob_phiI": {
+          "shape": [
+            461
+          ],
+          "dtype": "float64"
+        },
+        "test_prob_rho": {
+          "shape": [
+            461
+          ],
+          "dtype": "float64"
+        },
+        "test_prob_pred": {
+          "shape": [
+            461
+          ],
+          "dtype": "int64"
+        },
+        "test_prob_f": {
+          "shape": [
+            461
+          ],
+          "dtype": "float64"
+        },
+        "test_prob_base": {
+          "shape": [
+            461
+          ],
+          "dtype": "float64"
+        },
+        "oof_prob_uniform_rho": {
+          "shape": [
+            1837
+          ],
+          "dtype": "float64"
+        },
+        "test_prob_uniform_rho": {
+          "shape": [
+            461
+          ],
+          "dtype": "float64"
+        },
+        "library_versions": {
+          "shape": [],
+          "dtype": "<U183"
+        }
+      }
+    },
+    {
+      "path": "outputs/treeshap_v1.npz",
+      "category": "XGBoost explanation",
+      "exists": true,
+      "size_bytes": 511626,
+      "modified_local": "2026-11-18T13:44:01+05:30",
+      "arrays": {
+        "classes": {
+          "shape": [
+            6
+          ],
+          "dtype": "<U3"
+        },
+        "variables": {
+          "shape": [
+            8
+          ],
+          "dtype": "<U9"
+        },
+        "test_row_keys": {
+          "shape": [
+            461
+          ],
+          "dtype": "<U21"
+        },
+        "test_true_y": {
+          "shape": [
+            461
+          ],
+          "dtype": "int64"
+        },
+        "test_predicted_class": {
+          "shape": [
+            461
+          ],
+          "dtype": "int64"
+        },
+        "test_full_raw": {
+          "shape": [
+            461,
+            6,
+            8
+          ],
+          "dtype": "float64"
+        },
+        "test_full_probability": {
+          "shape": [
+            461,
+            6,
+            8
+          ],
+          "dtype": "float64"
+        },
+        "test_grouped_raw_predicted": {
+          "shape": [
+            461,
+            8
+          ],
+          "dtype": "float64"
+        },
+        "test_grouped_probability_predicted": {
+          "shape": [
+            461,
+            8
+          ],
+          "dtype": "float64"
+        },
+        "test_raw_expected_values": {
+          "shape": [
+            6
+          ],
+          "dtype": "float64"
+        },
+        "test_probability_expected_values": {
+          "shape": [
+            461,
+            6
+          ],
+          "dtype": "float64"
+        },
+        "test_background_indices": {
+          "shape": [
+            200
+          ],
+          "dtype": "int64"
+        },
+        "test_raw_additivity_residual": {
+          "shape": [
+            461,
+            6
+          ],
+          "dtype": "float64"
+        },
+        "test_raw_additivity_max_abs": {
+          "shape": [],
+          "dtype": "float64"
+        },
+        "test_probability_efficiency_max_abs": {
+          "shape": [],
+          "dtype": "float64"
+        },
+        "native_pred_contrib_rank_spearman": {
+          "shape": [],
+          "dtype": "float64"
+        },
+        "exact_method": {
+          "shape": [],
+          "dtype": "<U37"
+        },
+        "oof_status": {
+          "shape": [],
+          "dtype": "<U65"
+        },
+        "library_versions": {
+          "shape": [],
+          "dtype": "<U139"
+        }
+      }
+    },
+    {
+      "path": "outputs/image_explainers_v1.npz",
+      "category": "ViT explanation",
+      "exists": true,
+      "size_bytes": 1022518,
+      "modified_local": "2026-11-18T15:01:29+05:30",
+      "arrays": {
+        "classes": {
+          "shape": [
+            6
+          ],
+          "dtype": "<U3"
+        },
+        "test_row_keys": {
+          "shape": [
+            461
+          ],
+          "dtype": "<U21"
+        },
+        "test_true_y": {
+          "shape": [
+            461
+          ],
+          "dtype": "int64"
+        },
+        "target_fused_class": {
+          "shape": [
+            461
+          ],
+          "dtype": "int64"
+        },
+        "target_vit_top_class": {
+          "shape": [
+            461
+          ],
+          "dtype": "int64"
+        },
+        "vit_probability_max_abs": {
+          "shape": [],
+          "dtype": "float64"
+        },
+        "vit_argmax_disagreements": {
+          "shape": [],
+          "dtype": "int64"
+        },
+        "gradcam_fused": {
+          "shape": [
+            461,
+            14,
+            14
+          ],
+          "dtype": "float16"
+        },
+        "gradcam_vit_top": {
+          "shape": [
+            461,
+            14,
+            14
+          ],
+          "dtype": "float16"
+        },
+        "attention_rollout_fused": {
+          "shape": [
+            461,
+            14,
+            14
+          ],
+          "dtype": "float16"
+        },
+        "attention_rollout_vit_top": {
+          "shape": [
+            461,
+            14,
+            14
+          ],
+          "dtype": "float16"
+        },
+        "chefer_fused": {
+          "shape": [
+            461,
+            14,
+            14
+          ],
+          "dtype": "float16"
+        },
+        "chefer_vit_top": {
+          "shape": [
+            461,
+            14,
+            14
+          ],
+          "dtype": "float16"
+        },
+        "occlusion_fused": {
+          "shape": [
+            461,
+            14,
+            14
+          ],
+          "dtype": "float16"
+        },
+        "occlusion_vit_top": {
+          "shape": [
+            461,
+            14,
+            14
+          ],
+          "dtype": "float16"
+        },
+        "config_json": {
+          "shape": [],
+          "dtype": "<U982"
+        }
+      }
+    },
+    {
+      "path": "cache/images_uint8_224.pt",
+      "category": "Matched image cache",
+      "exists": true,
+      "size_bytes": 345915333,
+      "modified_local": "2026-10-14T09:53:50+05:30"
+    },
+    {
+      "path": "outputs/synthetic_phase_g_v1/pilot_balanced_085_085_v1/pilot_report.json",
+      "category": "Historical synthetic pilot",
+      "exists": true,
+      "size_bytes": 34614,
+      "modified_local": "2026-11-19T17:22:09+05:30"
+    },
+    {
+      "path": "experiments/phase_g_v2_2/config.json",
+      "category": "Phase G v2.2 authorization",
+      "exists": true,
+      "size_bytes": 2566,
+      "modified_local": "2026-11-21T08:49:55+05:30"
+    }
+  ]
+}
